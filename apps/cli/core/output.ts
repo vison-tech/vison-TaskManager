@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
 import type { Task } from '../../../packages/contracts/index.ts';
 import type { Output, ParsedArgs } from './types.ts';
 
@@ -63,11 +61,3 @@ function humanValue(value: unknown): string {
 export function output(value: unknown, args: ParsedArgs, io: Output): void {
   io.stdout.write(args.json ? `${JSON.stringify(value, null, 2)}\n` : `${humanValue(value)}\n`);
 }
-
-export async function readInputFile(path: string): Promise<Blob> {
-  const content = await readFile(path);
-  const mimeByExtension: Record<string, string> = { '.json': 'application/json', '.md': 'text/markdown', '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf' };
-  return new Blob([content], { type: mimeByExtension[extname(path).toLowerCase()] ?? 'application/octet-stream' });
-}
-
-export { basename };

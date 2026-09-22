@@ -3,7 +3,7 @@ import { basename, resolve } from 'node:path';
 import type { Session, TaskDetail } from '../../../packages/contracts/index.ts';
 import type { TaskClient } from '../../../packages/client/index.ts';
 import { enumFlag, flag, numberFlag, positional, requireNoExtraPositionals } from '../core/args.ts';
-import { readInputFile } from '../core/output.ts';
+import { readInputFile } from '../core/input.ts';
 import type { ParsedArgs } from '../core/types.ts';
 import { CliError } from '../core/types.ts';
 
