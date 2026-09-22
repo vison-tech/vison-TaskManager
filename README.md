@@ -5,14 +5,14 @@
 ## 产品定位
 
 - 任务工作台：项目、任务、看板、列表、文档、评论、附件、任务关系、仪表盘和时间轴。
-- Agent 协作：Web、CLI、MCP 使用同一套业务接口，记录操作来源与会话关联。
+- Agent 协作：Web、CLI 与 MCP 使用同一套业务接口，记录操作来源与会话关联。
 - 宿主嵌入：在 Codex、Claude 等桌面 Agent 中打开任务面板，按实际支持能力同步上下文和关联会话。
 - 开发上下文：任务可以关联工作区、分支、worktree 和执行会话，方便从计划直接进入实现。
 - 可持续扩展：AI 对话、项目自动化、外部项目管理系统、云协作和桌面分发按模块增加。
 
 ## 架构方向
 
-采用 TypeScript 模块化单体：React 工作台通过 HTTP 访问本地 Node 服务，SQLite 保存业务数据；CLI 和 MCP 复用共享客户端；宿主适配器负责面板与上下文桥接。
+采用 TypeScript 模块化单体：React 工作台通过 HTTP 访问本地 Node 服务，SQLite 保存业务数据；Web、CLI 和 MCP 复用共享 HTTP 客户端；宿主适配器负责面板与上下文桥接。
 
 | 层次 | 设计选择 |
 | --- | --- |
@@ -33,6 +33,114 @@
 | [架构设计](docs/architecture.md) | 模块边界、数据模型、事务、API、宿主协议和扩展方式 |
 | [任务拆分](docs/tasks.md) | T01–T36 主任务、独立子任务、前置依赖、写入范围与验收标准 |
 | [功能覆盖表](docs/feature-coverage.md) | 功能与任务映射、参考行为及待核对项 |
+
+## 本地运行
+
+```bash
+npm install
+npm run dev
+```
+
+打开 `http://127.0.0.1:5173` 使用 Web 工作台。服务默认监听 `127.0.0.1:47830`，SQLite 数据保存在项目目录的 `.data/taskmanager.sqlite`；可通过 `TASKMANAGER_DATA_DIR` 指定其他数据目录。
+
+常用检查命令：
+
+```bash
+npm run typecheck
+npm run build
+npm test
+```
+
+## Agent 联动
+
+MCP Server 使用 stdio 与桌面 Agent 通讯，再通过本地 HTTP API 访问 TaskManager。它不直接读写 SQLite，因此 Web、CLI 和 MCP 始终使用同一份任务数据。
+
+### CLI
+
+先启动 API，再在另一个终端运行 `taskctl`。CLI 只通过 HTTP 访问当前实例，不会自行创建第二个数据库：
+
+```bash
+npm run start
+
+npm run --silent taskctl -- projects list
+npm run --silent taskctl -- tasks list --project <project-id>
+npm run --silent taskctl -- tasks create --project <project-id> --title "检查 MCP 联动"
+npm run --silent taskctl -- tasks update <task-id> --version <version> --status in_review
+npm run --silent taskctl -- tasks comments add <task-id> --body "已完成实现，等待验收"
+```
+
+所有读取和写入命令都支持 `--json`。任务、项目、评论、关系和会话的更新/删除命令要求传入当前 `--version`；附件支持 `upload`、`download`、`list` 和 `delete`。可用命令总览：
+
+```bash
+npm run --silent taskctl -- --help
+```
+
+CLI 使用 `TASKMANAGER_URL`（默认 `http://127.0.0.1:47830`）和 `TASKMANAGER_ACTOR`（默认 `taskctl`），例如：
+
+```bash
+TASKMANAGER_URL=http://127.0.0.1:47830 \
+TASKMANAGER_ACTOR=local-cli \
+npm run --silent taskctl -- tasks list --json
+```
+
+共享 `TaskClient` 接受显式的 `baseUrl`、`actor`、`timeoutMs` 和可注入 `fetch`。SDK 本身不读取 `process.env`，因此可直接用于浏览器；CLI 与 MCP 只在各自 Node 入口读取环境变量。请求默认 30 秒超时，连接、超时和服务端错误统一为 `ApiError`，写操作不会自动重试。
+
+先启动 API（使用 Web 时可直接运行 `npm run dev`）：
+
+```bash
+npm run start
+```
+
+另开终端运行 MCP：
+
+```bash
+TASKMANAGER_URL=http://127.0.0.1:47830 \
+TASKMANAGER_ACTOR=local-agent \
+npm run --silent mcp
+```
+
+当前 MCP 工具包括：`list_projects`、`list_tasks`、`get_task`、`create_task`、`update_task`、`add_comment`、`add_relation`、`link_session`、`task_tree`。更新任务和增加关系需要传入当前 `version`，旧版本写入会返回冲突错误。
+
+### Codex
+
+在 `~/.codex/config.toml` 添加：
+
+```toml
+[mcp_servers.taskmanager]
+command = "npm"
+args = ["run", "--silent", "mcp"]
+cwd = "/Users/vison/IdeaProjects/MyAgent/TaskManager"
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+
+[mcp_servers.taskmanager.env]
+TASKMANAGER_URL = "http://127.0.0.1:47830"
+TASKMANAGER_ACTOR = "codex"
+```
+
+把 `cwd` 换成当前仓库绝对路径，重启 Codex 后即可在 MCP 工具列表中看到 TaskManager。Codex 的 MCP 配置由桌面端、CLI 和 IDE 扩展共享；MCP 可用不等于任务面板已经嵌入 Codex 原生窗口，原生面板仍属于后续 HostAdapter 工作。
+
+### Claude Desktop
+
+在 Claude Desktop 配置文件中加入同等的 stdio Server。macOS 默认路径为 `~/Library/Application Support/Claude/claude_desktop_config.json`，Windows 默认路径为 `%APPDATA%\\Claude\\claude_desktop_config.json`：
+
+```json
+{
+  "mcpServers": {
+    "taskmanager": {
+      "command": "npm",
+      "args": ["run", "--silent", "mcp"],
+      "cwd": "/Users/vison/IdeaProjects/MyAgent/TaskManager",
+      "env": {
+        "TASKMANAGER_URL": "http://127.0.0.1:47830",
+        "TASKMANAGER_ACTOR": "claude"
+      }
+    }
+  }
+}
+```
+
+启动 Claude Desktop 前确保 API 已运行。Claude Desktop 的 MCP 工具接入与桌面页面注入是两条独立路径；当前稳定可用的是 MCP、CLI 规划中的本地入口和浏览器工作台，Claude 原生面板能力需要单独验证。
 
 ## 目标目录
 
