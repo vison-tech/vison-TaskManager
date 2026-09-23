@@ -7,7 +7,7 @@ import { registerTaskTools, registerTaskTreeTool } from './tools/tasks.ts';
 
 export type { McpTaskClient } from './client.ts';
 
-export function createMcpServer(client: McpTaskClient = new TaskClient({ baseUrl: process.env.TASKMANAGER_URL || DEFAULT_TASKMANAGER_URL, actor: process.env.TASKMANAGER_ACTOR || 'mcp-agent' })) {
+export function createMcpServer(client: McpTaskClient = new TaskClient({ baseUrl: process.env.TASKMANAGER_URL || DEFAULT_TASKMANAGER_URL, actor: process.env.TASKMANAGER_ACTOR || 'mcp-agent', accessToken: process.env.TASKMANAGER_ACCESS_TOKEN })) {
   const server = new McpServer({ name: 'taskmanager', version: '0.1.0' });
   registerProjectTools(server, client);
   registerTaskTools(server, client);

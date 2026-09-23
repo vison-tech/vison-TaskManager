@@ -7,8 +7,10 @@
     "start": "tsx apps/server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:browser": "node --import tsx --test tests/browser/*.test.ts",
     "taskctl": "tsx apps/cli/index.ts",
     "mcp": "tsx apps/mcp/index.ts",
+    "backup": "tsx apps/server/backup.ts",
     "embed": "tsx apps/host/inject.ts"
   },
   "dependencies": {

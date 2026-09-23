@@ -7,7 +7,13 @@ export {
   projectPatch,
   relationCreate,
   sessionCreate,
+  taskCopy,
+  taskComplete,
   taskCreate,
   taskPatch,
   version,
+  agentRunCreate,
+  agentRunContinue,
+  automationCreate,
+  automationPatch,
 } from './validation/schemas.ts';

@@ -5,6 +5,8 @@ export const taskApi = {
   tasks: (filters: { projectId?: string; search?: string; status?: string; archived?: boolean | 'all' } = {}) => client.listTasks(filters),
   detail: (taskId: string) => client.getTask(taskId),
   createTask: (input: TaskInput) => client.createTask(input),
+  copyTask: (task: Task, title?: string) => client.copyTask(task.id, { version: task.version, title }),
+  completeTask: (task: Task) => client.completeTask(task.id, task.version),
   updateTask: (task: Task, input: Partial<TaskPatch>) => client.updateTask(task.id, { ...input, version: task.version }),
   deleteTask: (task: Task) => client.deleteTask(task.id, task.version),
 };

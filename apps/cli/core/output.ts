@@ -23,6 +23,7 @@ Task commands:
   tasks get <task-id>
   tasks create --project <id> --title <title> [task fields]
   tasks update <task-id> --version <n> [task fields]
+  tasks complete <task-id> --version <n>
   tasks archive <task-id> --version <n>
   tasks restore <task-id> --version <n>
   tasks delete <task-id> --version <n>

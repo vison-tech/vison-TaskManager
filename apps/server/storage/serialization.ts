@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { Activity, Attachment, Comment, Project, Relation, Session, Task } from '../../../packages/contracts/index.ts';
+import type { Activity, Attachment, Comment, Project, ProjectAttachment, Relation, Session, Task } from '../../../packages/contracts/index.ts';
 
 export type Row = Record<string, unknown>;
 
@@ -17,4 +17,5 @@ export function task(db: DatabaseSync, row: Row): Task {
 export function comment(row: Row): Comment { return { id: String(row.id), taskId: String(row.task_id), body: String(row.body), author: String(row.author), version: Number(row.version), createdAt: String(row.created_at), updatedAt: String(row.updated_at) }; }
 export function activity(row: Row): Activity { return { id: String(row.id), taskId: String(row.task_id), actor: String(row.actor), action: String(row.action), changes: parse(row.changes, {}), createdAt: String(row.created_at) }; }
 export function attachment(row: Row): Attachment { return { id: String(row.id), taskId: String(row.task_id), commentId: nullable(row.comment_id), filename: String(row.filename), contentType: String(row.content_type), size: Number(row.size), createdAt: String(row.created_at) }; }
+export function projectAttachment(row: Row): ProjectAttachment { return { id: String(row.id), projectId: String(row.project_id), filename: String(row.filename), contentType: String(row.content_type), size: Number(row.size), createdAt: String(row.created_at) }; }
 export function relation(row: Row): Relation { return { id: String(row.id), sourceId: String(row.source_id), targetId: String(row.target_id), type: row.type as Relation['type'] }; }

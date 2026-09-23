@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { platforms, projectKinds, relationTypes } from '../../../packages/contracts/index.ts';
 import type { Relation, Session } from '../../../packages/contracts/index.ts';
 import type { McpTaskClient } from '../client.ts';
 import { result, taskSummary } from '../format.ts';
@@ -14,7 +15,7 @@ export function registerCollaborationTools(server: McpServer, client: McpTaskCli
   server.registerTool('add_relation', {
     title: 'Add task relation',
     description: 'Add a parent, blocks, or related relation. Parent relations enforce one parent and reject cycles.',
-    inputSchema: { taskId: z.string().min(1), targetId: z.string().min(1), type: z.enum(['parent', 'blocks', 'related']), version: z.number().int().positive().describe('Current source task version') },
+    inputSchema: { taskId: z.string().min(1), targetId: z.string().min(1), type: z.enum(relationTypes), version: z.number().int().positive().describe('Current source task version') },
   }, async ({ taskId, targetId, type, version }) => result(await client.addRelation(taskId, targetId, type as Relation['type'], version)));
 
   server.registerTool('link_session', {
@@ -22,8 +23,8 @@ export function registerCollaborationTools(server: McpServer, client: McpTaskCli
     description: 'Link a Codex, Claude, Pi, AGY, or Grok session to a task without replacing other session links.',
     inputSchema: {
       taskId: z.string().min(1), version: z.number().int().positive().describe('Current task version'),
-      platform: z.enum(['codex', 'claude', 'pi', 'agy', 'grok']), sessionId: z.string().trim().min(1).max(500),
-      projectId: z.string().max(500).optional(), hostId: z.string().max(500).optional(), workspacePath: z.string().max(4096).optional(), projectKind: z.enum(['local', 'remote']).optional(),
+      platform: z.enum(platforms), sessionId: z.string().trim().min(1).max(500),
+      projectId: z.string().max(500).optional(), hostId: z.string().max(500).optional(), workspacePath: z.string().max(4096).optional(), projectKind: z.enum(projectKinds).optional(),
     },
   }, async ({ taskId, version, ...input }) => result(taskSummary(await client.addSession(taskId, { ...input, version } as Omit<Session, 'id'> & { version: number }))));
 }

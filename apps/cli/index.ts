@@ -4,7 +4,7 @@ import { parseArgs } from './core/args.ts';
 import { output, usage } from './core/output.ts';
 import { CliError, type Output } from './core/types.ts';
 
-export async function runCli(argv: string[], client = new TaskClient({ baseUrl: process.env.TASKMANAGER_URL || DEFAULT_TASKMANAGER_URL, actor: process.env.TASKMANAGER_ACTOR || 'taskctl' }), io: Output = process): Promise<number> {
+export async function runCli(argv: string[], client = new TaskClient({ baseUrl: process.env.TASKMANAGER_URL || DEFAULT_TASKMANAGER_URL, actor: process.env.TASKMANAGER_ACTOR || 'taskctl', accessToken: process.env.TASKMANAGER_ACCESS_TOKEN }), io: Output = process): Promise<number> {
   try {
     const args = parseArgs(argv);
     if (args.flags.get('help') === true || args.positionals.length === 0) { io.stdout.write(usage); return 0; }

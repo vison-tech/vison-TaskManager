@@ -41,7 +41,7 @@ npm install
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173` 使用 Web 工作台。服务默认监听 `127.0.0.1:47830`，SQLite 数据保存在项目目录的 `.data/taskmanager.sqlite`；可通过 `TASKMANAGER_DATA_DIR` 指定其他数据目录。
+打开 `http://127.0.0.1:5173` 使用 Web 工作台。服务默认监听 `127.0.0.1:47830`，SQLite 数据保存在项目目录的 `.data/taskmanager.sqlite`；可通过 `TASKMANAGER_DATA_DIR` 指定其他数据目录。需要保护实例时设置 `TASKMANAGER_ACCESS_TOKEN`；CLI/MCP 同时设置同名变量后会发送 bearer token。带 `Origin` 的浏览器请求仅接受 localhost/127.0.0.1 或 `TASKMANAGER_ALLOWED_ORIGINS` 中的来源。
 
 常用检查命令：
 
@@ -49,6 +49,21 @@ npm run dev
 npm run typecheck
 npm run build
 npm test
+```
+
+浏览器回归使用隔离的内存数据库和随机端口，不修改本地任务数据：
+
+```bash
+npm run test:browser
+```
+
+默认使用本机 Chrome；可通过 `PLAYWRIGHT_CHANNEL` 选择其他已安装的浏览器通道。覆盖卡片点击、同列/跨列拖动与持久化、键盘排序与撤销、写入冲突、评论、任务/README 附件、有向关系、会话关联、归档恢复、任务复制、列表行内编辑、主题/收件箱、仪表盘趋势和窄屏弹窗。
+
+实例数据可用独立附件目录备份和恢复。备份前停止正在写入该实例的进程：
+
+```bash
+npm run backup -- create ./backups/$(date +%Y%m%d-%H%M%S)
+npm run backup -- restore ./backups/<timestamp> ./.data-restored
 ```
 
 ## Agent 联动
@@ -66,6 +81,7 @@ npm run --silent taskctl -- projects list
 npm run --silent taskctl -- tasks list --project <project-id>
 npm run --silent taskctl -- tasks create --project <project-id> --title "检查 MCP 联动"
 npm run --silent taskctl -- tasks update <task-id> --version <version> --status in_review
+npm run --silent taskctl -- tasks complete <task-id> --version <version>
 npm run --silent taskctl -- tasks comments add <task-id> --body "已完成实现，等待验收"
 ```
 
@@ -80,6 +96,7 @@ CLI 使用 `TASKMANAGER_URL`（默认 `http://127.0.0.1:47830`）和 `TASKMANAGE
 ```bash
 TASKMANAGER_URL=http://127.0.0.1:47830 \
 TASKMANAGER_ACTOR=local-cli \
+TASKMANAGER_ACCESS_TOKEN=<instance-token> \
 npm run --silent taskctl -- tasks list --json
 ```
 
@@ -96,10 +113,17 @@ npm run start
 ```bash
 TASKMANAGER_URL=http://127.0.0.1:47830 \
 TASKMANAGER_ACTOR=local-agent \
+TASKMANAGER_ACCESS_TOKEN=<instance-token> \
 npm run --silent mcp
 ```
 
-当前 MCP 工具包括：`list_projects`、`list_tasks`、`get_task`、`create_task`、`update_task`、`add_comment`、`add_relation`、`link_session`、`task_tree`。更新任务和增加关系需要传入当前 `version`，旧版本写入会返回冲突错误。
+当前 MCP 工具包括：`list_projects`、`list_tasks`、`get_task`、`create_task`、`update_task`、`complete_task`、`add_comment`、`add_relation`、`link_session`、`task_tree`。更新、完成任务和增加关系需要传入当前 `version`，旧版本写入会返回冲突错误。
+
+重复任务使用显式完成接口：`POST /api/v1/tasks/:id/complete` 携带当前 `version` 会原子地把任务置为 `done`；任务带 `recurrence` 且有截止日期时，响应中的 `nextTask` 是下一期任务。普通 `PATCH status=done` 不会隐式生成下一期。月末和闰年按原始日期锚点截断，例如 1 月 31 日的月重复会生成 2 月 28/29 日，再回到下一个月的 31 日。
+
+本地 Agent 运行时默认没有可执行命令。需要显式设置 `TASKMANAGER_AGENT_COMMANDS`（逗号分隔的绝对命令路径）；可用模型同样通过 `TASKMANAGER_AGENT_MODELS` 声明，未声明的模型会被拒绝。权限模式使用 `TASKMANAGER_AGENT_PERMISSION_MODES`，技能目录使用 `TASKMANAGER_AGENT_SKILL_DIRS`。项目设置中的自动化只会从服务端返回的命令 allowlist 中选择，配额无法查询时显示 `unknown`。
+
+项目设置还提供 Jira 连接边界。服务从 `TASKMANAGER_JIRA_BASE_URL`、`TASKMANAGER_JIRA_EMAIL`、`TASKMANAGER_JIRA_API_TOKEN` 和可选的 `TASKMANAGER_JIRA_PROJECT_KEY` 读取配置；未配置时连接测试明确返回未配置。当前可测试连接并只读读取 Issue，真实账号下的导入、回写、冲突和归档同步仍需单独验收。
 
 ### Codex
 

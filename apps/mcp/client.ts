@@ -6,6 +6,7 @@ export interface McpTaskClient {
   getTask(taskId: string): Promise<TaskDetail>;
   createTask(input: TaskInput): Promise<Task>;
   updateTask(taskId: string, input: TaskPatch): Promise<Task>;
+  completeTask(taskId: string, version: number): Promise<{ task: Task; nextTask: Task | null }>;
   addComment(taskId: string, body: string): Promise<unknown>;
   addRelation(taskId: string, targetId: string, type: Relation['type'], version: number): Promise<unknown>;
   addSession(taskId: string, input: Omit<Session, 'id'> & { version: number }): Promise<Task>;
