@@ -1,5 +1,7 @@
 # TaskManager
 
+本项目采用 [Apache License 2.0](LICENSE) 开源。
+
 面向人与 AI Agent 协作的本地优先任务工作台。它把项目计划、任务执行、Agent 会话和开发上下文放在同一个工作面板中，支持独立使用，也支持嵌入桌面 Agent。
 
 ## 产品定位

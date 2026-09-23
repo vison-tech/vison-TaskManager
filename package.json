@@ -1,5 +1,5 @@
 {
-  "name": "taskmanager", "version": "0.1.0", "private": true, "type": "module",
+  "name": "taskmanager", "version": "0.1.0", "private": true, "type": "module", "license": "Apache-2.0",
   "engines": {"node": ">=24"},
   "scripts": {
     "dev": "concurrently -k -n api,web \"tsx watch apps/server/index.ts\" \"vite --config apps/web/vite.config.ts\"",
