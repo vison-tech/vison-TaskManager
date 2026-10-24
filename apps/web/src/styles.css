@@ -213,6 +213,14 @@ dialog.modal { width: min(510px, calc(100vw - 28px)); max-height: min(820px, cal
 .agent-attachments small { color: var(--subtle); line-height: 1.45; }
 .agent-chat-form { display: grid; gap: 8px; }
 .agent-chat-form > label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.agent-completions { display: grid; gap: 2px; max-height: 168px; overflow: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); box-shadow: 0 6px 16px rgba(30, 38, 49, .1); }
+.agent-completions.empty { padding: 7px 8px; border-style: dashed; color: var(--subtle); font-size: 10px; line-height: 1.45; box-shadow: none; }
+.agent-completion { display: grid; gap: 2px; padding: 5px 7px; border-radius: 5px; cursor: pointer; }
+.agent-completion strong { color: var(--text); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-completion span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.agent-completion.active { background: var(--surface-soft); }
+.agent-completion.disabled { cursor: not-allowed; }
+.agent-completion.disabled strong, .agent-completion.disabled span { color: var(--subtle); }
 .agent-capability-note { display: flex; align-items: flex-start; gap: 5px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); line-height: 1.45; }
 .agent-capability-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--blue); }
 .agent-capability-note span { color: var(--subtle); }

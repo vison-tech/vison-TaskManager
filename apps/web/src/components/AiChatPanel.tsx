@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Check, Loader2, MessageSquarePlus, Paperclip, RefreshCw, Send, Square, Terminal } from 'lucide-react';
 import type { AgentCatalog, AgentMessage, AgentThread, Attachment, Task } from '../../../../packages/contracts/index.ts';
 import { api } from '../api';
+import { expandSlashCommand } from '../lib/agentCompletions';
+import { AgentComposer } from './AgentComposer';
 import { ErrorMessage } from './shared';
 
 function contextPrompt(task: Task, attachments: Attachment[], selectedAttachmentIds: string[], input: string): string {
@@ -96,12 +98,16 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [messages.length]);
 
   function applySlashCommand(): boolean {
-    const text = input.trim();
-    if (text === '/context') { setInput(contextPrompt(task, attachments, selectedAttachmentIds, '请基于以上任务上下文继续。')); return true; }
-    if (text === '/attach') { setSelectedAttachmentIds(attachments.map((item) => item.id)); setInput(''); return true; }
-    if (text === '/stop') { void stop(); return true; }
-    return false;
+    const command = expandSlashCommand(input, running);
+    if (!command) return false;
+    if (command === '/context') { setInput(contextPrompt(task, attachments, selectedAttachmentIds, '请基于以上任务上下文继续。')); return true; }
+    if (command === '/attach') { setSelectedAttachmentIds(attachments.map((item) => item.id)); setInput(''); return true; }
+    void stop();
+    return true;
   }
+
+  // Picking a mention adds the skill to the run settings, so the inserted text and the request agree.
+  function rememberCandidate(candidate: { skillId?: string }) { if (candidate.skillId) setSkillIds((current) => current.includes(candidate.skillId!) ? current : [...current, candidate.skillId!]); }
 
   async function send(event?: FormEvent) {
     event?.preventDefault();
@@ -159,7 +165,7 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
         </article>)}
       </div>
       <form className="agent-chat-form" onSubmit={(event) => void send(event)}>
-        <label>消息<textarea rows={3} value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入任务请求；/context 插入任务摘要，/attach 选中全部附件，/stop 停止运行" disabled={running} /></label>
+        <label>消息<AgentComposer value={input} onChange={setInput} onSubmit={() => void send()} running={running} catalog={catalog} attachments={attachments} disabled={running} onCandidate={rememberCandidate} /></label>
         {running ? <button type="button" className="button secondary" onClick={() => void stop()} disabled={busy}><Square size={14} />停止</button> : <button type="submit" className="button primary" disabled={busy || !input.trim() || !command}><Send size={14} />发送</button>}
       </form>
       <div className="agent-capability-note"><Check size={13} />消息保存在服务端并可按序回放；事件流模式为 {catalog.stream}。<span>{catalog.slashCommands.map((item) => item.name).join(' ')}</span></div>
