@@ -14,6 +14,9 @@ export {
   version,
   agentRunCreate,
   agentRunContinue,
+  agentThreadCreate,
+  agentThreadPatch,
+  agentTurnCreate,
   automationCreate,
   automationPatch,
 } from './validation/schemas.ts';

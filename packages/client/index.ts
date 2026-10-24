@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentSkill, Automation, AutomationRun, JiraCapabilities, JiraIssue, Project, Task, TaskDetail, Comment, Attachment, ProjectAttachment, Relation, Session, TaskInput, TaskPatch, Snapshot } from '../contracts/index.ts';
+import type { AgentCapabilities, AgentCatalog, AgentMessage, AgentSkill, AgentThread, AgentTurnCreateInput, Automation, AutomationRun, JiraCapabilities, JiraIssue, Project, Task, TaskDetail, Comment, Attachment, ProjectAttachment, Relation, Session, TaskInput, TaskPatch, Snapshot } from '../contracts/index.ts';
 import { DEFAULT_TASKMANAGER_URL, expectedVersion, HttpTransport } from './transport.ts';
 import type { TaskClientOptions } from './transport.ts';
 
@@ -69,6 +69,16 @@ export class TaskClient {
   continueAgentRun(runId: string, input?: string) { return this.request<{ item: unknown }>(`/api/v1/agent/runs/${id(runId)}/continue`, 'POST', { input }).then((response) => response.item); }
   listAgentSkills() { return this.request<{ items: AgentSkill[] }>('/api/v1/agent/skills').then((response) => response.items); }
   agentCapabilities() { return this.request<AgentCapabilities>('/api/v1/agent/capabilities'); }
+  agentCatalog() { return this.request<AgentCatalog>('/api/v1/agent/catalog'); }
+
+  async listAgentThreads(filters: { projectId?: string; taskId?: string; limit?: number } = {}) { const q = new URLSearchParams(); for (const [key, value] of Object.entries(filters)) if (value !== undefined) q.set(key, String(value)); return (await this.request<{ items: AgentThread[] }>(`/api/v1/agent/threads${q.size ? `?${q}` : ''}`)).items; }
+  async createAgentThread(input: { projectId: string; taskId?: string | null; title?: string; sessionId: string; command?: string | null; model?: string | null; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }) { return (await this.request<{ item: AgentThread }>('/api/v1/agent/threads', 'POST', input)).item; }
+  async getAgentThread(threadId: string) { return (await this.request<{ item: AgentThread }>(`/api/v1/agent/threads/${id(threadId)}`)).item; }
+  async updateAgentThread(threadId: string, input: { version: number; title?: string; command?: string | null; model?: string | null; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }) { expectedVersion(input.version); return (await this.request<{ item: AgentThread }>(`/api/v1/agent/threads/${id(threadId)}`, 'PATCH', input)).item; }
+  deleteAgentThread(threadId: string, version: number) { return this.request<void>(`/api/v1/agent/threads/${id(threadId)}?version=${expectedVersion(version)}`, 'DELETE'); }
+  agentMessagesPage(threadId: string, options: { after?: number; before?: number; limit?: number } = {}) { const q = new URLSearchParams(); for (const [key, value] of Object.entries(options)) if (value !== undefined) q.set(key, String(value)); return this.request<{ items: AgentMessage[]; nextCursor: number }>(`/api/v1/agent/threads/${id(threadId)}/messages${q.size ? `?${q}` : ''}`); }
+  agentMessagesUrl(threadId: string, after = 0): string { return `${this.transport.baseUrl}/api/v1/agent/threads/${id(threadId)}/messages/stream?after=${after}`; }
+  agentTurn(threadId: string, input: AgentTurnCreateInput) { return this.request<{ item: { thread: AgentThread; message: AgentMessage; run: unknown } }>(`/api/v1/agent/threads/${id(threadId)}/turn`, 'POST', input).then((response) => response.item); }
   automationCapabilities() { return this.request<{ scheduler: string; quota: { status: 'unknown'; reason: string } }>('/api/v1/automations/capabilities'); }
   listAutomations(projectId?: string) { return this.request<{ items: Automation[] }>(`/api/v1/automations${projectId ? `?projectId=${id(projectId)}` : ''}`).then((response) => response.items); }
   createAutomation(input: Omit<Automation, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'nextRunAt'> & { nextRunAt?: string }) { return this.request<{ item: Automation }>('/api/v1/automations', 'POST', input).then((response) => response.item); }

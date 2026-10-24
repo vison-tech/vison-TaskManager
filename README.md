@@ -123,7 +123,7 @@ npm run --silent mcp
 
 重复任务使用显式完成接口：`POST /api/v1/tasks/:id/complete` 携带当前 `version` 会原子地把任务置为 `done`；任务带 `recurrence` 且有截止日期时，响应中的 `nextTask` 是下一期任务。普通 `PATCH status=done` 不会隐式生成下一期。月末和闰年按原始日期锚点截断，例如 1 月 31 日的月重复会生成 2 月 28/29 日，再回到下一个月的 31 日。
 
-本地 Agent 运行时默认没有可执行命令。需要显式设置 `TASKMANAGER_AGENT_COMMANDS`（逗号分隔的绝对命令路径）；可用模型同样通过 `TASKMANAGER_AGENT_MODELS` 声明，未声明的模型会被拒绝。权限模式使用 `TASKMANAGER_AGENT_PERMISSION_MODES`，技能目录使用 `TASKMANAGER_AGENT_SKILL_DIRS`。项目设置中的自动化只会从服务端返回的命令 allowlist 中选择，配额无法查询时显示 `unknown`。
+本地 Agent 运行时默认没有可执行命令。需要显式设置 `TASKMANAGER_AGENT_COMMANDS`（逗号分隔的绝对命令路径）；可用模型同样通过 `TASKMANAGER_AGENT_MODELS` 声明，未声明的模型会被拒绝。权限模式使用 `TASKMANAGER_AGENT_PERMISSION_MODES`，技能目录使用 `TASKMANAGER_AGENT_SKILL_DIRS`。命令输出默认按纯文本进对话；只有命令确实输出逐行 JSON 时，才设置 `TASKMANAGER_AGENT_STREAM=jsonl` 启用归一化，否则会出现整行解析失败。项目设置中的自动化只会从服务端返回的命令 allowlist 中选择，配额无法查询时显示 `unknown`。
 
 项目设置还提供 Jira 连接边界。服务从 `TASKMANAGER_JIRA_BASE_URL`、`TASKMANAGER_JIRA_EMAIL`、`TASKMANAGER_JIRA_API_TOKEN` 和可选的 `TASKMANAGER_JIRA_PROJECT_KEY` 读取配置；未配置时连接测试明确返回未配置。当前可测试连接并只读读取 Issue，真实账号下的导入、回写、冲突和归档同步仍需单独验收。
 

@@ -26,6 +26,10 @@ export const relationCreate = z.object({ targetId: text, type: z.enum(relationTy
 export const sessionCreate = sessionRef.extend({ version }).strict();
 export const agentRunCreate = z.object({ sessionId: text, command: text, args: z.array(z.string().max(4096)).max(100).default([]), cwd: z.string().max(4096).optional(), model: z.string().max(200).optional(), permissionMode: z.enum(['read', 'write', 'full']).default('read'), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).default([]), input: z.string().max(1_000_000).optional() }).strict();
 export const agentRunContinue = z.object({ input: z.string().max(1_000_000).optional() }).strict();
+const permissionMode = z.enum(['read', 'write', 'full']);
+export const agentThreadCreate = z.object({ projectId: text, taskId: z.string().max(200).nullable().optional(), title: z.string().trim().max(200).optional(), sessionId: text, command: z.string().max(4096).nullable().optional(), model: z.string().max(200).nullable().optional(), permissionMode: permissionMode.optional(), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).optional() }).strict();
+export const agentThreadPatch = z.object({ title: z.string().trim().min(1).max(200).optional(), command: z.string().max(4096).nullable().optional(), model: z.string().max(200).nullable().optional(), permissionMode: permissionMode.optional(), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).optional(), version: version }).strict();
+export const agentTurnCreate = z.object({ input: z.string().min(1).max(1_000_000), command: z.string().max(4096).optional(), model: z.string().max(200).optional(), permissionMode: permissionMode.optional(), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).optional() }).strict();
 export const automationCreate = z.object({ projectId: text, name: text, enabled: z.boolean().default(true), intervalSeconds: z.number().int().min(1).max(604800), command: text, sessionId: text, input: z.string().max(1_000_000).default(''), model: z.string().max(200).optional(), permissionMode: z.enum(['read', 'write', 'full']).default('read'), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).default([]), nextRunAt: z.string().datetime({ offset: true }).optional() }).strict();
 export const automationPatch = z.object({ version, name: text.optional(), enabled: z.boolean().optional(), intervalSeconds: z.number().int().min(1).max(604800).optional(), command: text.optional(), sessionId: text.optional(), input: z.string().max(1_000_000).optional(), model: z.string().max(200).nullable().optional(), permissionMode: z.enum(['read', 'write', 'full']).optional(), skillIds: z.array(z.string().trim().min(1).max(200)).max(100).optional(), nextRunAt: z.string().datetime({ offset: true }).optional() }).strict();
 
@@ -42,3 +46,6 @@ export type TaskCopyInput = z.infer<typeof taskCopy>;
 export type SessionCreateInput = z.infer<typeof sessionCreate>;
 export type AutomationCreateInput = z.infer<typeof automationCreate>;
 export type AutomationPatchInput = z.infer<typeof automationPatch>;
+export type AgentThreadCreateInput = z.infer<typeof agentThreadCreate>;
+export type AgentThreadPatchInput = z.infer<typeof agentThreadPatch>;
+export type AgentTurnCreateInput = z.infer<typeof agentTurnCreate>;

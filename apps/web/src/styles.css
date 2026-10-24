@@ -247,3 +247,21 @@ dialog.modal { width: min(510px, calc(100vw - 28px)); max-height: min(820px, cal
 .preference-option.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(30, 38, 49, .09); }
 @media (max-width: 520px) { .preference-row { align-items: flex-start; flex-direction: column; gap: 10px; } }
 @media (max-width: 760px) { .card-display-menu { right: auto; left: 0; } }
+.agent-thread-bar { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.agent-thread-bar .muted-copy { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-settings { display: grid; gap: 8px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }
+.agent-settings > summary { cursor: pointer; color: var(--subtle); font-size: 10px; }
+.agent-settings[open] > summary { margin-bottom: 2px; }
+.agent-settings > label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.agent-settings input, .agent-settings select { width: 100%; min-width: 0; height: 29px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; }
+.agent-settings input[readonly] { background: var(--surface-soft); color: var(--subtle); }
+.agent-settings input[type="checkbox"] { width: auto; height: auto; }
+.agent-unavailable { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; border: 1px dashed var(--line-strong); border-radius: 6px; background: var(--surface-soft); color: var(--muted); font-size: 10px; line-height: 1.5; }
+.agent-unavailable svg { flex: 0 0 auto; margin-top: 1px; color: var(--subtle); }
+.agent-unavailable strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 11px; }
+.agent-unavailable p { margin: 0 0 4px; }
+.agent-unavailable small { color: var(--subtle); }
+.agent-chat-message.activity { border-style: dashed; background: var(--surface-soft); }
+.agent-chat-message.activity pre, .agent-chat-message pre.agent-activity { color: var(--muted); }
+.agent-chat-message.kind-error { border-color: #f0c8c8; background: #fff7f7; }
+.agent-chat-message.kind-error strong { color: #b03a3a; }

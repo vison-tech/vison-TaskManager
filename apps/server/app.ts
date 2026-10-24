@@ -13,15 +13,18 @@ import { registerMetaRoutes } from './routes/meta.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
 import { AgentRuntime, type PermissionMode } from '../../packages/agent-runtime/index.ts';
+import type { AgentStreamMode } from '../../packages/contracts/values.ts';
 import { registerAgentRoutes } from './routes/agent.ts';
+import { ChatService } from './chat.ts';
+import { registerChatRoutes } from './routes/chat.ts';
 import { AutomationScheduler } from './automation.ts';
 import { registerAutomationRoutes } from './routes/automations.ts';
 import { JiraAdapter, type JiraAdapterOptions } from './integrations/jira.ts';
 import { registerJiraRoutes } from './routes/jira.ts';
 
-export interface TaskManagerApp { app: Hono; storage: Storage; agentRuntime: AgentRuntime; automationScheduler: AutomationScheduler; jira: JiraAdapter; close: () => void; }
+export interface TaskManagerApp { app: Hono; storage: Storage; agentRuntime: AgentRuntime; chat: ChatService; automationScheduler: AutomationScheduler; jira: JiraAdapter; close: () => void; }
 
-export interface TaskManagerAppOptions { dataDir?: string; accessToken?: string; allowedOrigins?: string[]; agentCommands?: string[]; agentModels?: string[]; agentSkillDirectories?: string[]; agentPermissionModes?: PermissionMode[]; jira?: JiraAdapterOptions; }
+export interface TaskManagerAppOptions { dataDir?: string; accessToken?: string; allowedOrigins?: string[]; agentCommands?: string[]; agentModels?: string[]; agentSkillDirectories?: string[]; agentPermissionModes?: PermissionMode[]; agentStreamMode?: AgentStreamMode; jira?: JiraAdapterOptions; }
 
 type WebSession = { csrfToken: string; createdAt: number };
 const sessionCookie = 'taskmanager_session';
@@ -35,7 +38,8 @@ function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
 
 export function createTaskManagerApp(options: TaskManagerAppOptions = {}): TaskManagerApp {
   const storage = new Storage(options.dataDir ?? process.env.TASKMANAGER_DATA_DIR ?? join(process.cwd(), '.data'));
-  const agentRuntime = new AgentRuntime({ allowedCommands: options.agentCommands ?? (process.env.TASKMANAGER_AGENT_COMMANDS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), allowedModels: options.agentModels ?? (process.env.TASKMANAGER_AGENT_MODELS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), skillDirectories: options.agentSkillDirectories ?? (process.env.TASKMANAGER_AGENT_SKILL_DIRS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), permissionModes: options.agentPermissionModes ?? (process.env.TASKMANAGER_AGENT_PERMISSION_MODES?.split(',').map((value) => value.trim()).filter((value): value is PermissionMode => ['read', 'write', 'full'].includes(value)) ?? []), persistence: storage.agentRuntimePersistence() });
+  const agentRuntime = new AgentRuntime({ allowedCommands: options.agentCommands ?? (process.env.TASKMANAGER_AGENT_COMMANDS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), allowedModels: options.agentModels ?? (process.env.TASKMANAGER_AGENT_MODELS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), skillDirectories: options.agentSkillDirectories ?? (process.env.TASKMANAGER_AGENT_SKILL_DIRS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), permissionModes: options.agentPermissionModes ?? (process.env.TASKMANAGER_AGENT_PERMISSION_MODES?.split(',').map((value) => value.trim()).filter((value): value is PermissionMode => ['read', 'write', 'full'].includes(value)) ?? []), streamMode: options.agentStreamMode, persistence: storage.agentRuntimePersistence() });
+  const chat = new ChatService(storage, agentRuntime);
   const automationScheduler = new AutomationScheduler(storage, agentRuntime);
   const jira = new JiraAdapter(options.jira);
   const app = new Hono();
@@ -90,8 +94,9 @@ export function createTaskManagerApp(options: TaskManagerAppOptions = {}): TaskM
   registerAttachmentRoutes(app, storage);
   registerEventRoutes(app, storage);
   registerAgentRoutes(app, agentRuntime);
+  registerChatRoutes(app, chat);
   registerAutomationRoutes(app, storage, automationScheduler);
   registerJiraRoutes(app, jira);
 
-  return { app, storage, agentRuntime, automationScheduler, jira, close: () => { sessions.clear(); automationScheduler.close(); agentRuntime.shutdown(); storage.close(); } };
+  return { app, storage, agentRuntime, chat, automationScheduler, jira, close: () => { sessions.clear(); chat.close(); automationScheduler.close(); agentRuntime.shutdown(); storage.close(); } };
 }

@@ -2,12 +2,17 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import type { AgentStreamMode } from '../contracts/values.ts';
+import { createStreamDecoder, streamModeFromEnvironment, type AgentStreamDecoder, type AgentStreamItem } from './decode.ts';
+
+export type { AgentStreamItem } from './decode.ts';
+export { createStreamDecoder, streamModeFromEnvironment } from './decode.ts';
 
 export type PermissionMode = 'read' | 'write' | 'full';
-export type AgentRunRequest = { sessionId: string; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; model?: string; permissionMode?: PermissionMode; skillIds?: string[]; input?: string };
+export type AgentRunRequest = { sessionId: string; threadId?: string; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; model?: string; permissionMode?: PermissionMode; skillIds?: string[]; input?: string };
 export type AgentSkill = { id: string; name: string; description: string };
 export type AgentEventType = 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
-export type AgentEvent = { sequence: number; runId: string; sessionId: string; type: AgentEventType; data?: string; exitCode?: number | null; signal?: string | null; createdAt: string };
+export type AgentEvent = { sequence: number; runId: string; sessionId: string; type: AgentEventType; data?: string; items?: AgentStreamItem[]; exitCode?: number | null; signal?: string | null; createdAt: string };
 export type AgentRun = { runId: string; sessionId: string; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; request: AgentRunRequest; startedAt: string; finishedAt?: string; exitCode?: number | null; signal?: string | null };
 export type AgentRuntimePersistedRun = { run: AgentRun; events: AgentEvent[] };
 export interface AgentRuntimePersistence {
@@ -15,14 +20,14 @@ export interface AgentRuntimePersistence {
   saveRunAndEvent(run: AgentRun, event: AgentEvent): void;
   eventsSince(runId: string, sequence: number): AgentEvent[];
 }
-export type AgentRuntimeOptions = { allowedCommands: string[]; allowedModels?: string[]; skillDirectories?: string[]; permissionModes?: PermissionMode[]; maxHistory?: number; killGraceMs?: number; persistence?: AgentRuntimePersistence };
+export type AgentRuntimeOptions = { allowedCommands: string[]; allowedModels?: string[]; skillDirectories?: string[]; permissionModes?: PermissionMode[]; maxHistory?: number; killGraceMs?: number; streamMode?: AgentStreamMode; persistence?: AgentRuntimePersistence };
 export type AgentEventListener = (event: AgentEvent) => void;
 
 export class AgentRuntimeError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'AgentRuntimeError'; }
 }
 
-type ActiveRun = { run: AgentRun; process: ChildProcessWithoutNullStreams; events: AgentEvent[]; nextSequence: number; cancelTimer?: ReturnType<typeof setTimeout> };
+type ActiveRun = { run: AgentRun; process: ChildProcessWithoutNullStreams; events: AgentEvent[]; nextSequence: number; decoder: AgentStreamDecoder; cancelTimer?: ReturnType<typeof setTimeout> };
 
 export class AgentRuntime {
   private readonly allowedCommands: Set<string>;
@@ -31,6 +36,7 @@ export class AgentRuntime {
   private readonly killGraceMs: number;
   private readonly skillsById = new Map<string, AgentSkill & { path: string }>();
   private readonly permissionModes: Set<PermissionMode>;
+  private readonly streamMode: AgentStreamMode;
   private readonly active = new Map<string, ActiveRun>();
   private readonly history = new Map<string, AgentEvent[]>();
   private readonly completed = new Map<string, AgentRun>();
@@ -44,12 +50,13 @@ export class AgentRuntime {
     this.maxHistory = Math.max(1, options.maxHistory ?? 1000);
     this.killGraceMs = Math.max(100, options.killGraceMs ?? 2000);
     this.persistence = options.persistence;
+    this.streamMode = options.streamMode ?? streamModeFromEnvironment(process.env.TASKMANAGER_AGENT_STREAM);
     this.loadSkills(options.skillDirectories ?? []);
     this.restore();
   }
 
   skills(): AgentSkill[] { return [...this.skillsById.values()].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, name, description }) => ({ id, name, description })); }
-  capabilities() { return { commands: [...this.allowedCommands], models: [...this.allowedModels], permissionModes: [...this.permissionModes], skills: this.skills() }; }
+  capabilities() { return { commands: [...this.allowedCommands], models: [...this.allowedModels], permissionModes: [...this.permissionModes], skills: this.skills(), stream: this.streamMode }; }
 
   start(request: AgentRunRequest): AgentRun {
     this.validateRequest(request);
@@ -57,12 +64,17 @@ export class AgentRuntime {
     const run: AgentRun = { runId: randomUUID(), sessionId: request.sessionId, status: 'running', request: { ...request, args: [...(request.args ?? [])], skillIds: [...(request.skillIds ?? [])] }, startedAt: new Date().toISOString() };
     const selectedSkills = (request.skillIds ?? []).map((skillId) => this.skillsById.get(skillId)!);
     const child = spawn(request.command, request.args ?? [], { cwd: request.cwd, env: { ...process.env, ...request.env, ...(selectedSkills.length ? { TASKMANAGER_SKILL_IDS: selectedSkills.map((skill) => skill.id).join(','), TASKMANAGER_SKILL_DIRS: selectedSkills.map((skill) => skill.path).join(delimiter) } : {}) }, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-    const state: ActiveRun = { run, process: child, events: [], nextSequence: 1 };
+    const state: ActiveRun = { run, process: child, events: [], nextSequence: 1, decoder: createStreamDecoder(this.streamMode) };
     this.active.set(run.runId, state); this.append(state, { type: 'started', data: JSON.stringify({ model: request.model ?? null, permissionMode: request.permissionMode ?? 'read', skillIds: request.skillIds ?? [] }) });
-    child.stdout.on('data', (chunk: Buffer) => { if (state.run.status === 'running') this.append(state, { type: 'stdout', data: chunk.toString('utf8') }); });
+    child.stdout.on('data', (chunk: Buffer) => { if (state.run.status === 'running') { const items = state.decoder.push(chunk.toString('utf8')); this.append(state, { type: 'stdout', data: chunk.toString('utf8'), ...(items.length ? { items } : {}) }); } });
     child.stderr.on('data', (chunk: Buffer) => { if (state.run.status === 'running') this.append(state, { type: 'stderr', data: chunk.toString('utf8') }); });
     child.once('error', (error) => this.finish(state, 'failed', null, null, error.message));
-    child.once('close', (code, signal) => { if (state.run.status === 'running') this.finish(state, code === 0 ? 'completed' : 'failed', code, signal); });
+    child.once('close', (code, signal) => {
+      if (state.run.status !== 'running') return;
+      const trailing = state.decoder.flush();
+      if (trailing.length) this.append(state, { type: 'stdout', items: trailing });
+      this.finish(state, code === 0 ? 'completed' : 'failed', code, signal);
+    });
     if (request.input !== undefined) { child.stdin.write(request.input); child.stdin.end(); }
     return { ...run, request: { ...run.request, args: [...(run.request.args ?? [])], skillIds: [...(run.request.skillIds ?? [])] } };
   }

@@ -2,11 +2,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Activity, Attachment, Automation, AutomationRun, Comment, Project, ProjectAttachment, Relation, Session, Task, TaskDetail, TaskInput, TaskPatch, RevisionEvent } from '../../packages/contracts/index.ts';
+import type { Activity, AgentMessage, AgentThread, Attachment, Automation, AutomationRun, Comment, Project, ProjectAttachment, Relation, Session, Task, TaskDetail, TaskInput, TaskPatch, RevisionEvent } from '../../packages/contracts/index.ts';
 import type { AgentEvent, AgentEventType, AgentRun, AgentRuntimePersistence, AgentRuntimePersistedRun } from '../../packages/agent-runtime/index.ts';
 import { fail, validateTask } from './validation.ts';
 import { migrate } from './storage/schema.ts';
-import { activity, attachment, comment, iso, json, project, projectAttachment, relation, Row, task } from './storage/serialization.ts';
+import { activity, agentMessage, agentThread, attachment, comment, iso, json, project, projectAttachment, relation, Row, task } from './storage/serialization.ts';
 import { nextRecurrenceConfig, recurrenceNextDates } from './recurrence.ts';
 
 type Actor = string;
@@ -58,13 +58,13 @@ export class Storage {
     if (this.closed) return;
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare(`INSERT INTO agent_runs(run_id,session_id,status,request,started_at,finished_at,exit_code,signal,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(run_id) DO UPDATE SET session_id=excluded.session_id,status=excluded.status,request=excluded.request,started_at=excluded.started_at,finished_at=excluded.finished_at,exit_code=excluded.exit_code,signal=excluded.signal,updated_at=excluded.updated_at`).run(
-        run.runId, run.sessionId, run.status, JSON.stringify(run.request), run.startedAt, run.finishedAt ?? null, run.exitCode ?? null, run.signal ?? null, event.createdAt,
+      this.db.prepare(`INSERT INTO agent_runs(run_id,session_id,thread_id,status,request,started_at,finished_at,exit_code,signal,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(run_id) DO UPDATE SET session_id=excluded.session_id,thread_id=COALESCE(excluded.thread_id,agent_runs.thread_id),status=excluded.status,request=excluded.request,started_at=excluded.started_at,finished_at=excluded.finished_at,exit_code=excluded.exit_code,signal=excluded.signal,updated_at=excluded.updated_at`).run(
+        run.runId, run.sessionId, run.request.threadId ?? null, run.status, JSON.stringify(run.request), run.startedAt, run.finishedAt ?? null, run.exitCode ?? null, run.signal ?? null, event.createdAt,
       );
-      this.db.prepare('INSERT INTO agent_events(run_id,sequence,session_id,type,data,exit_code,signal,created_at) VALUES (?,?,?,?,?,?,?,?)').run(
-        event.runId, event.sequence, event.sessionId, event.type, event.data ?? null, event.exitCode ?? null, event.signal ?? null, event.createdAt,
+      this.db.prepare('INSERT INTO agent_events(run_id,sequence,session_id,type,data,items,exit_code,signal,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(
+        event.runId, event.sequence, event.sessionId, event.type, event.data ?? null, event.items?.length ? json(event.items) : null, event.exitCode ?? null, event.signal ?? null, event.createdAt,
       );
       this.db.exec('COMMIT');
     } catch (error) {
@@ -86,6 +86,9 @@ export class Storage {
   private deserializeAgentEvent(row: Row): AgentEvent {
     const event: AgentEvent = { sequence: Number(row.sequence), runId: String(row.run_id), sessionId: String(row.session_id), type: String(row.type) as AgentEventType, createdAt: String(row.created_at) };
     if (row.data !== null && row.data !== undefined) event.data = String(row.data);
+    if (typeof row.items === 'string' && row.items) {
+      try { const items = JSON.parse(row.items) as AgentEvent['items']; if (Array.isArray(items)) event.items = items; } catch { /* A corrupt items blob must not hide the raw event. */ }
+    }
     if (row.exit_code !== null && row.exit_code !== undefined) event.exitCode = Number(row.exit_code);
     if (row.signal !== null && row.signal !== undefined) event.signal = String(row.signal);
     return event;
@@ -118,6 +121,76 @@ export class Storage {
   }
   updateAutomationRun(id: string, input: { runId?: string | null; status: AutomationRun['status']; reason?: string }) { const current = this.db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as Row | undefined; if (!current) fail(404, 'AUTOMATION_RUN_NOT_FOUND', 'Automation run not found'); const finishedAt = input.status === 'started' ? null : iso(); this.db.prepare('UPDATE automation_runs SET run_id=COALESCE(?,run_id),status=?,reason=?,finished_at=? WHERE id=?').run(input.runId ?? null, input.status, input.reason ?? null, finishedAt, id); return this.automationRun(this.db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(id) as Row); }
   listAutomationRuns(automationId: string) { this.getAutomation(automationId); return (this.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC').all(automationId) as Row[]).map((row) => this.automationRun(row)); }
+
+  listAgentThreads(filters: { projectId?: string; taskId?: string; limit?: number } = {}): AgentThread[] {
+    const clauses: string[] = []; const values: Array<string | number> = [];
+    if (filters.projectId) { clauses.push('project_id = ?'); values.push(filters.projectId); }
+    if (filters.taskId) { clauses.push('task_id = ?'); values.push(filters.taskId); }
+    const limit = Math.min(Math.max(1, Math.trunc(filters.limit ?? 50)), 200);
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    return (this.db.prepare(`SELECT * FROM agent_threads ${where} ORDER BY COALESCE(last_message_at, created_at) DESC, id DESC LIMIT ?`).all(...values, limit) as Row[]).map((row) => agentThread(row));
+  }
+  getAgentThread(id: string): AgentThread {
+    const row = this.db.prepare('SELECT * FROM agent_threads WHERE id = ?').get(id) as Row | undefined;
+    if (!row) fail(404, 'THREAD_NOT_FOUND', 'Agent thread not found');
+    return agentThread(row);
+  }
+  getAgentThreadBySession(sessionId: string): AgentThread | null { const row = this.db.prepare('SELECT * FROM agent_threads WHERE session_id = ?').get(sessionId) as Row | undefined; return row ? agentThread(row) : null; }
+  createAgentThread(input: { projectId: string; taskId?: string | null; title?: string; sessionId: string; command?: string | null; model?: string | null; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }): AgentThread {
+    this.getProject(input.projectId);
+    if (this.getAgentThreadBySession(input.sessionId)) fail(409, 'THREAD_SESSION_TAKEN', `A thread already owns session ${input.sessionId}`);
+    const now = iso();
+    const thread: AgentThread = { id: randomUUID(), projectId: input.projectId, taskId: input.taskId ?? null, title: (input.title ?? '').trim(), sessionId: input.sessionId, command: input.command ?? null, model: input.model ?? null, permissionMode: input.permissionMode ?? 'read', skillIds: [...(input.skillIds ?? [])], lastRunId: null, messageCount: 0, lastMessageAt: null, version: 1, createdAt: now, updatedAt: now };
+    this.db.prepare('INSERT INTO agent_threads(id,project_id,task_id,title,session_id,command,model,permission_mode,skill_ids,last_run_id,message_count,last_message_at,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(thread.id, thread.projectId, thread.taskId, thread.title, thread.sessionId, thread.command, thread.model, thread.permissionMode, json(thread.skillIds), null, 0, null, thread.version, thread.createdAt, thread.updatedAt);
+    return thread;
+  }
+  updateAgentThread(id: string, input: { version: number; title?: string; command?: string | null; model?: string | null; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }): AgentThread {
+    const current = this.getAgentThread(id);
+    if (current.version !== input.version) fail(409, 'VERSION_CONFLICT', `Thread changed; current version is ${current.version}`);
+    const next: AgentThread = { ...current, title: input.title ?? current.title, command: input.command === null ? null : input.command ?? current.command, model: input.model === null ? null : input.model ?? current.model, permissionMode: input.permissionMode ?? current.permissionMode, skillIds: input.skillIds ? [...input.skillIds] : current.skillIds, version: current.version + 1, updatedAt: iso() };
+    this.db.prepare('UPDATE agent_threads SET title=?,command=?,model=?,permission_mode=?,skill_ids=?,version=?,updated_at=? WHERE id=? AND version=?').run(next.title, next.command, next.model, next.permissionMode, json(next.skillIds), next.version, next.updatedAt, id, current.version);
+    return this.getAgentThread(id);
+  }
+  deleteAgentThread(id: string, version: number): void {
+    const current = this.getAgentThread(id);
+    if (current.version !== version) fail(409, 'VERSION_CONFLICT', `Thread changed; current version is ${current.version}`);
+    this.db.prepare('DELETE FROM agent_threads WHERE id = ?').run(id);
+  }
+  touchAgentThread(id: string, input: { runId?: string; messageCount: number; lastMessageAt: string }): void {
+    this.db.prepare('UPDATE agent_threads SET last_run_id=COALESCE(?,last_run_id),message_count=?,last_message_at=?,updated_at=? WHERE id=?').run(input.runId ?? null, input.messageCount, input.lastMessageAt, input.lastMessageAt, id);
+  }
+  nextAgentMessageSequence(threadId: string): number { const row = this.db.prepare('SELECT COALESCE(MAX(sequence), 0) AS value FROM agent_messages WHERE thread_id = ?').get(threadId) as Row; return Number(row.value) + 1; }
+  appendAgentMessage(input: { threadId: string; role: AgentMessage['role']; kind: AgentMessage['kind']; content: string; data?: unknown; runId?: string | null }): AgentMessage {
+    this.getAgentThread(input.threadId);
+    const message: AgentMessage = { id: randomUUID(), threadId: input.threadId, sequence: this.nextAgentMessageSequence(input.threadId), role: input.role, kind: input.kind, content: input.content, data: input.data ?? null, runId: input.runId ?? null, createdAt: iso() };
+    this.db.prepare('INSERT INTO agent_messages(id,thread_id,sequence,role,kind,content,data,run_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(message.id, message.threadId, message.sequence, message.role, message.kind, message.content, message.data === null || message.data === undefined ? null : json(message.data), message.runId, message.createdAt);
+    const count = Number((this.db.prepare('SELECT COUNT(*) AS value FROM agent_messages WHERE thread_id = ?').get(input.threadId) as Row).value);
+    this.touchAgentThread(input.threadId, { runId: message.runId ?? undefined, messageCount: count, lastMessageAt: message.createdAt });
+    return message;
+  }
+  /** Appends to the newest message of the thread when role and kind match, so a streaming run does not create one row per chunk. */
+  appendOrMergeAgentMessage(input: { threadId: string; role: AgentMessage['role']; kind: AgentMessage['kind']; content: string; runId?: string | null; merge?: boolean }): AgentMessage {
+    if (input.merge) {
+      const last = this.db.prepare('SELECT * FROM agent_messages WHERE thread_id = ? ORDER BY sequence DESC LIMIT 1').get(input.threadId) as Row | undefined;
+      if (last && last.role === input.role && last.kind === input.kind && last.run_id === (input.runId ?? null) && input.content) {
+        const content = `${String(last.content)}${input.content}`;
+        this.db.prepare('UPDATE agent_messages SET content=?,created_at=? WHERE id=?').run(content, iso(), String(last.id));
+        const merged = agentMessage(this.db.prepare('SELECT * FROM agent_messages WHERE id = ?').get(String(last.id)) as Row);
+        this.touchAgentThread(input.threadId, { messageCount: Number((this.db.prepare('SELECT COUNT(*) AS value FROM agent_messages WHERE thread_id = ?').get(input.threadId) as Row).value), lastMessageAt: merged.createdAt });
+        return merged;
+      }
+    }
+    return this.appendAgentMessage(input);
+  }
+  listAgentMessagesPage(threadId: string, options: { after?: number; before?: number; limit?: number } = {}): { items: AgentMessage[]; nextCursor: number } {
+    this.getAgentThread(threadId);
+    const limit = Math.min(Math.max(1, Math.trunc(options.limit ?? 100)), 500);
+    const after = options.after ?? 0;
+    const before = options.before ?? Number.MAX_SAFE_INTEGER;
+    const rows = this.db.prepare('SELECT * FROM agent_messages WHERE thread_id = ? AND sequence > ? AND sequence < ? ORDER BY sequence LIMIT ?').all(threadId, after, before, limit + 1) as Row[];
+    const items = rows.slice(0, limit).map((row) => agentMessage(row));
+    return { items, nextCursor: items.at(-1)?.sequence ?? after };
+  }
 
   write<T>(operation: () => T, resource: Omit<RevisionRecord, 'revision'> = {}): T {
     this.db.exec('BEGIN IMMEDIATE');

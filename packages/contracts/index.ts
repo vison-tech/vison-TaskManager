@@ -1,13 +1,13 @@
-export { priorities, projectKinds, relationTypes, statuses, platforms } from './values.ts';
-export type { Priority, ProjectKind, RelationType, Status, Platform } from './values.ts';
-import type { Priority, ProjectKind, RelationType, Status, Platform } from './values.ts';
+export { priorities, projectKinds, relationTypes, statuses, platforms, agentMessageRoles, agentMessageKinds, agentStreamModes } from './values.ts';
+export type { Priority, ProjectKind, RelationType, Status, Platform, AgentMessageRole, AgentMessageKind, AgentStreamMode } from './values.ts';
+import type { Priority, ProjectKind, RelationType, Status, Platform, AgentMessageRole, AgentMessageKind, AgentStreamMode } from './values.ts';
 export type ActorType = 'user' | 'agent' | 'system';
 export interface Actor { type: ActorType; id: string; name?: string; avatar?: string; }
 export interface SessionRef { platform: Platform; sessionId: string; projectId?: string; hostId?: string; workspacePath?: string; projectKind?: ProjectKind; }
 export type AttachmentOwner = { type: 'task' | 'comment' | 'project'; id: string };
 export type ExpectedVersion = number;
 export interface ApiError { error: { code: string; message: string; details?: unknown; requestId: string; } }
-export interface RevisionEvent { protocolVersion: '1'; type: 'revision'; revision: number; resource?: 'project' | 'task' | 'comment' | 'attachment' | 'relation' | 'session' | 'readme'; resourceId?: string; }
+export interface RevisionEvent { protocolVersion: '1'; type: 'revision'; revision: number; resource?: 'project' | 'task' | 'comment' | 'attachment' | 'relation' | 'session' | 'readme' | 'agent'; resourceId?: string; }
 export type HostCapability = 'embedPanel' | 'readContext' | 'openConversation' | 'composeDraft' | 'runAgent';
 export type HostCapabilityState = 'supported' | 'unsupported' | 'unavailable';
 export interface HostCapabilityInfo { state: HostCapabilityState; reason?: string; }
@@ -16,6 +16,11 @@ export interface HostBridgeMessage { protocolVersion: '1'; requestId: string; ty
 export interface Session extends SessionRef { id:string; }
 export interface AgentSkill { id: string; name: string; description: string; }
 export interface AgentCapabilities { commands: string[]; models: string[]; permissionModes: Array<'read' | 'write' | 'full'>; skills: AgentSkill[]; }
+export interface AgentCatalogCommand { id: string; label: string; available: boolean; reason?: string; }
+export interface AgentCatalogSkill extends AgentSkill { available: boolean; }
+export interface AgentCatalog { available: boolean; reason: string | null; stream: AgentStreamMode; commands: AgentCatalogCommand[]; models: string[]; permissionModes: Array<'read' | 'write' | 'full'>; skills: AgentCatalogSkill[]; slashCommands: Array<{ name: string; description: string }>; }
+export interface AgentThread { id: string; projectId: string; taskId: string | null; title: string; sessionId: string; command: string | null; model: string | null; permissionMode: 'read' | 'write' | 'full'; skillIds: string[]; lastRunId: string | null; messageCount: number; lastMessageAt: string | null; version: number; createdAt: string; updatedAt: string; }
+export interface AgentMessage { id: string; threadId: string; sequence: number; role: AgentMessageRole; kind: AgentMessageKind; content: string; data: unknown; runId: string | null; createdAt: string; }
 export type AutomationRunStatus = 'started' | 'completed' | 'failed' | 'skipped';
 export interface Automation { id: string; projectId: string; name: string; enabled: boolean; intervalSeconds: number; command: string; sessionId: string; input: string; model?: string; permissionMode: 'read' | 'write' | 'full'; skillIds: string[]; nextRunAt: string; version: number; createdAt: string; updatedAt: string; }
 export interface AutomationRun { id: string; automationId: string; triggerKey: string; runId: string | null; status: AutomationRunStatus; reason?: string; createdAt: string; finishedAt: string | null; }
@@ -40,6 +45,7 @@ export {
   actor, apiError, attachmentOwner, commentCreate, commentPatch, date, developmentContext,
   hostBridgeMessage, hostCapabilities, hostCapability, hostCapabilityState, labels,
   projectCreate, projectPatch, recurrence, relationCreate, revisionEvent, sessionCreate, taskCopy, taskComplete, agentRunCreate, agentRunContinue,
+  agentThreadCreate, agentThreadPatch, agentTurnCreate,
   sessionRef, taskCreate, taskPatch, automationCreate, automationPatch, version,
 } from './schemas.ts';
-export type { AutomationCreateInput, AutomationPatchInput, TaskCopyInput, TaskCreateInput, TaskPatchInput, SessionCreateInput } from './schemas.ts';
+export type { AutomationCreateInput, AutomationPatchInput, TaskCopyInput, TaskCreateInput, TaskPatchInput, SessionCreateInput, AgentThreadCreateInput, AgentThreadPatchInput, AgentTurnCreateInput } from './schemas.ts';

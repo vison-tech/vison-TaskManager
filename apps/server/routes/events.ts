@@ -9,7 +9,7 @@ export function registerEventRoutes(app: Hono, storage: Storage): void {
     let closeStream: (() => void) | undefined;
     const resource = c.req.query('resource') as RevisionRecord['resource'];
     const resourceId = c.req.query('resourceId');
-    const allowedResources = new Set(['project', 'task', 'comment', 'attachment', 'relation', 'session', 'readme']);
+    const allowedResources = new Set(['project', 'task', 'comment', 'attachment', 'relation', 'session', 'readme', 'agent']);
     if (resource && !allowedResources.has(resource)) return new Response('Invalid resource filter', { status: 422 });
     const matches = (event: RevisionRecord) => (!resource || event.resource === resource) && (!resourceId || event.resourceId === resourceId);
     const stream = new ReadableStream<Uint8Array>({
