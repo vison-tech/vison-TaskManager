@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentCatalog, AgentMessage, AgentSkill, AgentThread, AgentTurnCreateInput, Automation, AutomationRun, JiraCapabilities, JiraIssue, Project, Task, TaskDetail, Comment, Attachment, ProjectAttachment, Relation, Session, TaskInput, TaskPatch, Snapshot } from '../contracts/index.ts';
+import type { AgentCapabilities, AgentCatalog, AgentMessage, AgentSkill, AgentThread, AgentThreadCompressResult, AgentTurnCreateInput, Automation, AutomationRun, JiraCapabilities, JiraIssue, Project, ProjectSummary, Task, TaskDetail, Comment, Attachment, ProjectAttachment, Relation, Session, TaskInput, TaskPatch, Snapshot } from '../contracts/index.ts';
 import { DEFAULT_TASKMANAGER_URL, expectedVersion, HttpTransport } from './transport.ts';
 import type { TaskClientOptions } from './transport.ts';
 
@@ -79,6 +79,8 @@ export class TaskClient {
   agentMessagesPage(threadId: string, options: { after?: number; before?: number; limit?: number } = {}) { const q = new URLSearchParams(); for (const [key, value] of Object.entries(options)) if (value !== undefined) q.set(key, String(value)); return this.request<{ items: AgentMessage[]; nextCursor: number }>(`/api/v1/agent/threads/${id(threadId)}/messages${q.size ? `?${q}` : ''}`); }
   agentMessagesUrl(threadId: string, after = 0): string { return `${this.transport.baseUrl}/api/v1/agent/threads/${id(threadId)}/messages/stream?after=${after}`; }
   agentTurn(threadId: string, input: AgentTurnCreateInput) { return this.request<{ item: { thread: AgentThread; message: AgentMessage; run: unknown } }>(`/api/v1/agent/threads/${id(threadId)}/turn`, 'POST', input).then((response) => response.item); }
+  async compressAgentThread(threadId: string, options: { keep?: number } = {}) { return (await this.request<{ item: AgentThreadCompressResult }>(`/api/v1/agent/threads/${id(threadId)}/compress`, 'POST', { ...options })).item; }
+  projectSummary(projectId: string) { return this.request<{ item: ProjectSummary }>(`/api/v1/projects/${id(projectId)}/summary`).then((response) => response.item); }
   automationCapabilities() { return this.request<{ scheduler: string; quota: { status: 'unknown'; reason: string } }>('/api/v1/automations/capabilities'); }
   listAutomations(projectId?: string) { return this.request<{ items: Automation[] }>(`/api/v1/automations${projectId ? `?projectId=${id(projectId)}` : ''}`).then((response) => response.items); }
   createAutomation(input: Omit<Automation, 'id' | 'version' | 'createdAt' | 'updatedAt' | 'nextRunAt'> & { nextRunAt?: string }) { return this.request<{ item: Automation }>('/api/v1/automations', 'POST', input).then((response) => response.item); }

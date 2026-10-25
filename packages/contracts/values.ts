@@ -4,7 +4,7 @@ export const platforms = ['codex', 'claude', 'pi', 'agy', 'grok'] as const;
 export const relationTypes = ['parent', 'blocks', 'related'] as const;
 export const projectKinds = ['local', 'remote'] as const;
 export const agentMessageRoles = ['user', 'assistant', 'activity', 'system'] as const;
-export const agentMessageKinds = ['message', 'command', 'file_change', 'tool_call', 'error'] as const;
+export const agentMessageKinds = ['message', 'command', 'file_change', 'tool_call', 'error', 'summary'] as const;
 export const agentStreamModes = ['text', 'jsonl'] as const;
 
 export type Status = typeof statuses[number];

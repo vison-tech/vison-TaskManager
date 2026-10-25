@@ -14,6 +14,7 @@ export {
   version,
   agentRunCreate,
   agentRunContinue,
+  agentThreadCompress,
   agentThreadCreate,
   agentThreadPatch,
   agentTurnCreate,

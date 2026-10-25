@@ -21,6 +21,8 @@ export interface AgentCatalogSkill extends AgentSkill { available: boolean; }
 export interface AgentCatalog { available: boolean; reason: string | null; stream: AgentStreamMode; commands: AgentCatalogCommand[]; models: string[]; permissionModes: Array<'read' | 'write' | 'full'>; skills: AgentCatalogSkill[]; slashCommands: Array<{ name: string; description: string }>; }
 export interface AgentThread { id: string; projectId: string; taskId: string | null; title: string; sessionId: string; command: string | null; model: string | null; permissionMode: 'read' | 'write' | 'full'; skillIds: string[]; lastRunId: string | null; messageCount: number; lastMessageAt: string | null; version: number; createdAt: string; updatedAt: string; }
 export interface AgentMessage { id: string; threadId: string; sequence: number; role: AgentMessageRole; kind: AgentMessageKind; content: string; data: unknown; runId: string | null; createdAt: string; }
+export interface AgentThreadCompressResult { thread: AgentThread; summary: AgentMessage | null; replacedSequences: number[]; remainingCount: number; }
+export interface ProjectSummary { projectId: string; taskCount: number; activeTaskCount: number; doneTaskCount: number; overdueTaskCount: number; byStatus: Record<string, number>; byPriority: Record<string, number>; generatedAt: string; }
 export type AutomationRunStatus = 'started' | 'completed' | 'failed' | 'skipped';
 export interface Automation { id: string; projectId: string; name: string; enabled: boolean; intervalSeconds: number; command: string; sessionId: string; input: string; model?: string; permissionMode: 'read' | 'write' | 'full'; skillIds: string[]; nextRunAt: string; version: number; createdAt: string; updatedAt: string; }
 export interface AutomationRun { id: string; automationId: string; triggerKey: string; runId: string | null; status: AutomationRunStatus; reason?: string; createdAt: string; finishedAt: string | null; }
@@ -45,7 +47,7 @@ export {
   actor, apiError, attachmentOwner, commentCreate, commentPatch, date, developmentContext,
   hostBridgeMessage, hostCapabilities, hostCapability, hostCapabilityState, labels,
   projectCreate, projectPatch, recurrence, relationCreate, revisionEvent, sessionCreate, taskCopy, taskComplete, agentRunCreate, agentRunContinue,
-  agentThreadCreate, agentThreadPatch, agentTurnCreate,
+  agentThreadCompress, agentThreadCreate, agentThreadPatch, agentTurnCreate,
   sessionRef, taskCreate, taskPatch, automationCreate, automationPatch, version,
 } from './schemas.ts';
-export type { AutomationCreateInput, AutomationPatchInput, TaskCopyInput, TaskCreateInput, TaskPatchInput, SessionCreateInput, AgentThreadCreateInput, AgentThreadPatchInput, AgentTurnCreateInput } from './schemas.ts';
+export type { AutomationCreateInput, AutomationPatchInput, TaskCopyInput, TaskCreateInput, TaskPatchInput, SessionCreateInput, AgentThreadCompressInput, AgentThreadCreateInput, AgentThreadPatchInput, AgentTurnCreateInput } from './schemas.ts';

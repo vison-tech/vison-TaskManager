@@ -9,6 +9,8 @@ export const agentApi = {
   agentMessagesPage: (threadId: string, options: { after?: number; before?: number; limit?: number } = {}) => client.agentMessagesPage(threadId, options),
   agentMessagesUrl: (threadId: string, after = 0) => client.agentMessagesUrl(threadId, after),
   agentTurn: (threadId: string, input: Parameters<typeof client.agentTurn>[1]) => client.agentTurn(threadId, input),
+  compressAgentThread: (threadId: string, options: { keep?: number } = {}) => client.compressAgentThread(threadId, options),
+  projectSummary: (projectId: string) => client.projectSummary(projectId),
   agentEvents: (runId: string, after = 0) => client.agentEvents(runId, after),
   agentEventsUrl: (runId: string, after = 0) => client.agentEventsUrl(runId, after),
   getAgentRun: (runId: string) => client.getAgentRun(runId),

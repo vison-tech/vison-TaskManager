@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import { CalendarRange, CheckCircle2, CircleAlert, Clock3, Star, Target, TrendingUp, Users } from 'lucide-react';
-import type { Relation, Task, TaskPatch } from '../../../../packages/contracts/index.ts';
+import { CalendarRange, CheckCircle2, CircleAlert, Clock3, Star, Target, TrendingUp, Users, Wand } from 'lucide-react';
+import type { ProjectSummary, Relation, Task, TaskPatch } from '../../../../packages/contracts/index.ts';
 import { priorities, priorityLabels, statuses, statusLabels } from '../../../../packages/contracts/index.ts';
 import { api } from '../api';
 import { formatDate } from '../lib/format';
@@ -15,6 +15,16 @@ function todayValue() { return new Date().toISOString().slice(0, 10); }
 export function DashboardView({ tasks, relations, projectId }: { tasks: Task[]; relations: Relation[]; projectId: string }) {
   const { locale, text } = useLocale();
   const focusKey = `taskmanager.focused-tasks:${projectId}`;
+  const [projectSummary, setProjectSummary] = useState<ProjectSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<unknown>(null);
+  // The summary is server-side read-only task statistics, fetched separately so a dashboard
+  // without the endpoint degrades to an explicit error instead of faking numbers.
+  useEffect(() => {
+    let cancelled = false;
+    setSummaryError(null);
+    api.projectSummary(projectId).then((value) => { if (!cancelled) setProjectSummary(value); }).catch((value) => { if (!cancelled) setSummaryError(value); });
+    return () => { cancelled = true; };
+  }, [projectId, tasks.length]);
   const [focusedIds, setFocusedIds] = useState<string[]>(() => { try { const value = JSON.parse(localStorage.getItem(focusKey) ?? '[]'); return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []; } catch { return []; } });
   const active = tasks.filter((task) => !task.archivedAt);
   const completed = active.filter((task) => task.status === 'done').length;
@@ -55,6 +65,17 @@ export function DashboardView({ tasks, relations, projectId }: { tasks: Task[]; 
       <section className="insights-section"><div className="insights-section-head"><h3>{text('状态分布', 'Status distribution')}</h3><span>{active.length} {text('项', 'items')}</span></div><div className="status-bars">{statusCounts.map(({ status, count }) => <div className="status-bar-row" key={status}><div className="status-bar-label"><StatusDot status={status} /><span>{locale === 'en' ? statusLabelsEn[status] : statusLabels[status]}</span><strong>{count}</strong></div><div className="status-bar-track"><i style={{ width: `${active.length ? Math.max(count / active.length * 100, count ? 4 : 0) : 0}%` }} /></div></div>)}</div></section>
       <section className="insights-section"><div className="insights-section-head"><h3>{text('优先级', 'Priority')}</h3><span>{text('活跃任务', 'Active tasks')}</span></div><div className="priority-list">{priorityCounts.map(({ priority, count }) => <div className="priority-row" key={priority}><span className={`priority priority-${priority}`}>{locale === 'en' ? priorityLabelsEn[priority] : priorityLabels[priority]}</span><strong>{count}</strong><span className="priority-share">{active.length ? `${Math.round(count / active.length * 100)}%` : '0%'}</span></div>)}</div></section>
     </div>
+    <section className="insights-section project-summary" aria-label={text('项目摘要（只读统计）', 'Project summary (read-only statistics)')}>
+      <div className="insights-section-head"><h3><Wand size={14} />{text('项目摘要（只读统计）', 'Project summary (read-only statistics)')}</h3><span>{projectSummary ? text('服务端生成', 'generated server-side') : ''}</span></div>
+      {summaryError ? <p className="muted-copy">{text('摘要统计读取失败，不显示伪造数据。', 'Summary statistics are unavailable; no fabricated data is shown.')}</p>
+        : projectSummary ? <div className="project-summary-grid">
+          <div className="project-summary-item"><strong>{projectSummary.taskCount}</strong><span>{text('任务总数', 'Tasks')}</span></div>
+          <div className="project-summary-item"><strong>{projectSummary.activeTaskCount}</strong><span>{text('活跃任务', 'Active')}</span></div>
+          <div className="project-summary-item"><strong>{projectSummary.doneTaskCount}</strong><span>{text('完成/取消', 'Done or canceled')}</span></div>
+          <div className={`project-summary-item ${projectSummary.overdueTaskCount > 0 ? 'danger' : ''}`}><strong>{projectSummary.overdueTaskCount}</strong><span>{text('已逾期', 'Overdue')}</span></div>
+          <small>{text(`生成于 ${new Date(projectSummary.generatedAt).toLocaleString()}；压缩/摘要由 AI 对话面板入口提供，无模型能力时不会生成摘要文本。`, `Generated ${new Date(projectSummary.generatedAt).toLocaleString()}; without model capability no summary text is produced.`)}</small>
+        </div> : <p className="muted-copy">{text('正在生成项目摘要统计…', 'Building project summary statistics…')}</p>}
+    </section>
     <div className="insights-columns insights-secondary">
       <section className="insights-section"><div className="insights-section-head"><h3><TrendingUp size={14} />最近 7 日更新</h3><span>按任务更新时间</span></div><div className="trend-chart" role="img" aria-label="最近 7 日任务更新趋势">{trend.map((item) => <div className="trend-day" key={item.day}><div className="trend-track"><i style={{ height: `${Math.max(item.count / maxTrend * 100, item.count ? 10 : 0)}%` }} title={`${item.day} ${item.count} 项`} /></div><strong>{item.count}</strong><span>{item.day.slice(5)}</span></div>)}</div></section>
       <section className="insights-section"><div className="insights-section-head"><h3><Users size={14} />负责人分布</h3><span>活跃任务</span></div>{contributors.length ? <div className="contributor-list">{contributors.map((item) => <div className="contributor-row" key={item.name}><span>{item.name}</span><i><b style={{ width: `${item.count / Math.max(contributors[0].count, 1) * 100}%` }} /></i><strong>{item.count}</strong></div>)}</div> : <p className="muted-copy">当前项目还没有任务。</p>}</section>

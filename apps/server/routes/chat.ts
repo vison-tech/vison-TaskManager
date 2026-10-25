@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import { body, routeId } from '../context.ts';
-import { agentThreadCreate, agentThreadPatch, agentTurnCreate, fail } from '../validation.ts';
+import { agentThreadCompress, agentThreadCreate, agentThreadPatch, agentTurnCreate, fail } from '../validation.ts';
 import type { AgentMessage } from '../../../packages/contracts/index.ts';
 import { chatError, ChatService } from '../chat.ts';
 
@@ -41,6 +41,19 @@ export function registerChatRoutes(app: Hono, chat: ChatService): void {
     const id = routeId(c.req.param('id'));
     const input = await body(c, agentTurnCreate);
     try { return c.json({ item: await chat.turn(id, input) }, 201); } catch (error) { return chatError(error); }
+  });
+
+  app.post('/api/v1/agent/threads/:id/compress', async (c) => {
+    const id = routeId(c.req.param('id'));
+    let input: unknown;
+    try { input = await c.req.json(); } catch { input = {}; }
+    const parsed = agentThreadCompress.safeParse(input);
+    if (!parsed.success) fail(422, 'VALIDATION_ERROR', 'Compress body is invalid');
+    try { return c.json({ item: chat.compressThread(id, parsed.data) }); } catch (error) { return chatError(error); }
+  });
+
+  app.get('/api/v1/projects/:id/summary', (c) => {
+    try { return c.json({ item: chat.projectSummary(routeId(c.req.param('id'))) }); } catch (error) { return chatError(error); }
   });
 
   // Message stream: one SSE frame per appended message. It never fabricates output; a thread with no

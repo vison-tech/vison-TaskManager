@@ -256,6 +256,15 @@ dialog.modal { width: min(510px, calc(100vw - 28px)); max-height: min(820px, cal
 @media (max-width: 520px) { .preference-row { align-items: flex-start; flex-direction: column; gap: 10px; } }
 @media (max-width: 760px) { .card-display-menu { right: auto; left: 0; } }
 .agent-thread-bar { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.agent-thread-actions { display: inline-flex; align-items: center; gap: 4px; }
+.agent-summary { color: var(--text); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-chat-message.kind-summary { border-color: #cfd9ea; background: #f3f6fc; }
+.project-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; color: var(--muted); font-size: 10px; }
+.project-summary-item { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.project-summary-item strong { color: var(--text); font-size: 18px; }
+.project-summary-item.danger { border-color: #f2c7c7; background: #fff5f5; }
+.project-summary-item.danger strong { color: var(--red); }
+.project-summary-grid small { grid-column: 1 / -1; color: var(--subtle); font-size: 10px; line-height: 1.5; }
 .agent-thread-bar .muted-copy { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-settings { display: grid; gap: 8px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }
 .agent-settings > summary { cursor: pointer; color: var(--subtle); font-size: 10px; }

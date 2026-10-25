@@ -4,23 +4,24 @@ type Row = Record<string, unknown>;
 
 export function migrate(db: DatabaseSync): void {
   const version = Number((db.prepare('PRAGMA user_version').get() as Row).user_version ?? 0);
-  if (version > 7) throw new Error(`Unsupported database schema version ${version}`);
+  if (version > 8) throw new Error(`Unsupported database schema version ${version}`);
   if (version === 1) {
     db.exec(`BEGIN IMMEDIATE; CREATE TABLE project_attachments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), content BLOB NOT NULL, created_at TEXT NOT NULL); CREATE INDEX project_attachments_project_created ON project_attachments(project_id, created_at, id); PRAGMA user_version = 2; COMMIT;`);
     db.exec(`BEGIN IMMEDIATE; ALTER TABLE attachments ADD COLUMN storage_key TEXT; ALTER TABLE project_attachments ADD COLUMN storage_key TEXT; CREATE UNIQUE INDEX attachments_storage_key ON attachments(storage_key) WHERE storage_key IS NOT NULL; CREATE UNIQUE INDEX project_attachments_storage_key ON project_attachments(storage_key) WHERE storage_key IS NOT NULL; PRAGMA user_version = 3; COMMIT;`);
-    createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db);
+    createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); createAgentSummaryTables(db);
     return;
   }
   if (version === 2) {
     db.exec(`BEGIN IMMEDIATE; ALTER TABLE attachments ADD COLUMN storage_key TEXT; ALTER TABLE project_attachments ADD COLUMN storage_key TEXT; CREATE UNIQUE INDEX attachments_storage_key ON attachments(storage_key) WHERE storage_key IS NOT NULL; CREATE UNIQUE INDEX project_attachments_storage_key ON project_attachments(storage_key) WHERE storage_key IS NOT NULL; PRAGMA user_version = 3; COMMIT;`);
-    createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db);
+    createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); createAgentSummaryTables(db);
     return;
   }
-  if (version === 3) { createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); return; }
-  if (version === 4) { createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); return; }
-  if (version === 5) { createRevisionEvents(db); createAgentChatTables(db); return; }
-  if (version === 6) { createAgentChatTables(db); return; }
-  if (version === 7) return;
+  if (version === 3) { createAgentTables(db); createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); createAgentSummaryTables(db); return; }
+  if (version === 4) { createAutomationTables(db); createRevisionEvents(db); createAgentChatTables(db); createAgentSummaryTables(db); return; }
+  if (version === 5) { createRevisionEvents(db); createAgentChatTables(db); createAgentSummaryTables(db); return; }
+  if (version === 6) { createAgentChatTables(db); createAgentSummaryTables(db); return; }
+  if (version === 7) { createAgentSummaryTables(db); return; }
+  if (version === 8) return;
   db.exec(`
     BEGIN IMMEDIATE;
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL UNIQUE, workspace_path TEXT, labels TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(labels)), readme TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -51,7 +52,7 @@ export function migrate(db: DatabaseSync): void {
     CREATE TABLE agent_threads (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, title TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL UNIQUE, command TEXT, model TEXT, permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read','write','full')), skill_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(skill_ids)), last_run_id TEXT, message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0), last_message_at TEXT, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE INDEX agent_threads_project_updated ON agent_threads(project_id, updated_at);
     CREATE INDEX agent_threads_task ON agent_threads(task_id) WHERE task_id IS NOT NULL;
-    CREATE TABLE agent_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK (sequence > 0), role TEXT NOT NULL CHECK (role IN ('user','assistant','activity','system')), kind TEXT NOT NULL CHECK (kind IN ('message','command','file_change','tool_call','error')), content TEXT NOT NULL DEFAULT '', data TEXT CHECK (data IS NULL OR json_valid(data)), run_id TEXT, created_at TEXT NOT NULL, UNIQUE(thread_id, sequence));
+    CREATE TABLE agent_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK (sequence > 0), role TEXT NOT NULL CHECK (role IN ('user','assistant','activity','system')), kind TEXT NOT NULL CHECK (kind IN ('message','command','file_change','tool_call','error','summary')), content TEXT NOT NULL DEFAULT '', data TEXT CHECK (data IS NULL OR json_valid(data)), run_id TEXT, created_at TEXT NOT NULL, UNIQUE(thread_id, sequence));
     CREATE INDEX agent_messages_thread_sequence ON agent_messages(thread_id, sequence);
     CREATE TABLE automations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, name TEXT NOT NULL, enabled INTEGER NOT NULL CHECK (enabled IN (0,1)), interval_seconds INTEGER NOT NULL CHECK (interval_seconds BETWEEN 1 AND 604800), command TEXT NOT NULL, session_id TEXT NOT NULL, input TEXT NOT NULL DEFAULT '', model TEXT, permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read','write','full')), skill_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(skill_ids)), next_run_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE INDEX automations_project_enabled ON automations(project_id, enabled, next_run_at);
@@ -59,7 +60,7 @@ export function migrate(db: DatabaseSync): void {
     CREATE INDEX automation_runs_automation_created ON automation_runs(automation_id, created_at);
     CREATE TABLE revision_events (revision INTEGER PRIMARY KEY CHECK (revision >= 0), resource TEXT, resource_id TEXT);
     CREATE INDEX revision_events_revision ON revision_events(revision);
-    PRAGMA user_version = 7;
+    PRAGMA user_version = 8;
     COMMIT;
   `);
 }
@@ -98,6 +99,20 @@ function createRevisionEvents(db: DatabaseSync): void {
   `);
 }
 
+function createAgentSummaryTables(db: DatabaseSync): void {
+  // The kind CHECK constraint cannot be extended in place, so the table is rebuilt with the wider domain.
+  db.exec(`
+    BEGIN IMMEDIATE;
+    ALTER TABLE agent_messages RENAME TO agent_messages_old;
+    CREATE TABLE agent_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK (sequence > 0), role TEXT NOT NULL CHECK (role IN ('user','assistant','activity','system')), kind TEXT NOT NULL CHECK (kind IN ('message','command','file_change','tool_call','error','summary')), content TEXT NOT NULL DEFAULT '', data TEXT CHECK (data IS NULL OR json_valid(data)), run_id TEXT, created_at TEXT NOT NULL, UNIQUE(thread_id, sequence));
+    INSERT INTO agent_messages(id, thread_id, sequence, role, kind, content, data, run_id, created_at) SELECT id, thread_id, sequence, role, kind, content, data, run_id, created_at FROM agent_messages_old;
+    DROP TABLE agent_messages_old;
+    CREATE INDEX agent_messages_thread_sequence ON agent_messages(thread_id, sequence);
+    PRAGMA user_version = 8;
+    COMMIT;
+  `);
+}
+
 function createAgentChatTables(db: DatabaseSync): void {
   db.exec(`
     BEGIN IMMEDIATE;
@@ -107,7 +122,7 @@ function createAgentChatTables(db: DatabaseSync): void {
     CREATE TABLE agent_threads (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, title TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL UNIQUE, command TEXT, model TEXT, permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read','write','full')), skill_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(skill_ids)), last_run_id TEXT, message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0), last_message_at TEXT, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE INDEX agent_threads_project_updated ON agent_threads(project_id, updated_at);
     CREATE INDEX agent_threads_task ON agent_threads(task_id) WHERE task_id IS NOT NULL;
-    CREATE TABLE agent_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK (sequence > 0), role TEXT NOT NULL CHECK (role IN ('user','assistant','activity','system')), kind TEXT NOT NULL CHECK (kind IN ('message','command','file_change','tool_call','error')), content TEXT NOT NULL DEFAULT '', data TEXT CHECK (data IS NULL OR json_valid(data)), run_id TEXT, created_at TEXT NOT NULL, UNIQUE(thread_id, sequence));
+    CREATE TABLE agent_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK (sequence > 0), role TEXT NOT NULL CHECK (role IN ('user','assistant','activity','system')), kind TEXT NOT NULL CHECK (kind IN ('message','command','file_change','tool_call','error','summary')), content TEXT NOT NULL DEFAULT '', data TEXT CHECK (data IS NULL OR json_valid(data)), run_id TEXT, created_at TEXT NOT NULL, UNIQUE(thread_id, sequence));
     CREATE INDEX agent_messages_thread_sequence ON agent_messages(thread_id, sequence);
     PRAGMA user_version = 7;
     COMMIT;

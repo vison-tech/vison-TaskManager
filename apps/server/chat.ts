@@ -1,10 +1,11 @@
-import type { AgentCatalog, AgentMessage, AgentThread } from '../../packages/contracts/index.ts';
+import type { AgentCatalog, AgentMessage, AgentThread, AgentThreadCompressResult, ProjectSummary } from '../../packages/contracts/index.ts';
 import { AgentRuntime, AgentRuntimeError, type AgentEvent, type AgentRun } from '../../packages/agent-runtime/index.ts';
 import { fail } from './validation.ts';
 import { Storage } from './storage.ts';
 
 export type ChatTurnResult = { thread: AgentThread; message: AgentMessage; run: AgentRun };
 export type ChatMessageListener = (message: AgentMessage) => void;
+export type ChatCompressOptions = { keep?: number };
 
 const slashCommands = [
   { name: '/context', description: '插入当前任务上下文' },
@@ -74,6 +75,61 @@ export class ChatService {
 
   messages(threadId: string, options: { after?: number; before?: number; limit?: number } = {}) {
     return this.storage.listAgentMessagesPage(threadId, options);
+  }
+
+  /**
+   * Folds the early messages of a thread into a single deterministic summary. A summary is a
+   * structured recount of what already happened; without a declared model the agent cannot fold,
+   * and a local template posing as model output is never fabricated.
+   */
+  compressThread(threadId: string, options: ChatCompressOptions = {}): AgentThreadCompressResult {
+    if (this.runtime.activeForSession(this.storage.getAgentThread(threadId).sessionId)) {
+      throw new AgentRuntimeError('SESSION_BUSY', `Thread ${threadId} still has a running agent`);
+    }
+    const keep = Math.max(1, Math.trunc(options.keep ?? 20));
+    const messages = this.storage.listAllAgentMessages(threadId);
+    const summaryMessages = messages.filter((message) => message.kind === 'summary');
+    const foldable = messages.filter((message) => message.kind !== 'summary');
+    const targetCount = summaryMessages.length + 1 + keep;
+    if (foldable.length <= targetCount) {
+      return { thread: this.storage.getAgentThread(threadId), summary: null, replacedSequences: [], remainingCount: messages.length };
+    }
+    const toReplace = foldable.length - keep;
+    const replaced = messages.slice(0, toReplace);
+    const sections: string[] = [];
+    const userTurns = replaced.filter((message) => message.role === 'user' && message.kind === 'message');
+    const assistantReplies = replaced.filter((message) => message.role === 'assistant' && message.kind === 'message');
+    const toolCalls = replaced.filter((message) => message.kind === 'tool_call');
+    const fileChanges = replaced.filter((message) => message.kind === 'file_change');
+    const errors = replaced.filter((message) => message.kind === 'error');
+    const commands = replaced.filter((message) => message.kind === 'command');
+    const runs = [...new Set(replaced.map((message) => message.runId).filter(Boolean))].length;
+    const excerpt = (content: string, max = 120) => {
+      const flat = content.replace(/\s+/g, ' ').trim();
+      return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+    };
+    if (userTurns.length) sections.push(`用户请求 ${userTurns.length} 次：${userTurns.map((message) => excerpt(message.content)).join('；')}`);
+    if (assistantReplies.length) sections.push(`Agent 回复 ${assistantReplies.length} 次`);
+    if (toolCalls.length) sections.push(`工具调用 ${toolCalls.length} 项：${excerpt(toolCalls.map((message) => message.content).join(' | '), 200)}`);
+    if (commands.length) sections.push(`命令 ${commands.length} 项`);
+    if (fileChanges.length) sections.push(`文件变更 ${fileChanges.length} 项`);
+    if (errors.length) sections.push(`错误 ${errors.length} 项：${excerpt(errors.map((message) => message.content).join(' | '), 200)}`);
+    const content = `历史摘要：折叠了 ${replaced.length} 条早期消息（涉及 ${runs} 次运行，保留最近 ${keep} 条原文）。${sections.join('。')}。`;
+
+    this.storage.write(() => {
+      this.storage.deleteAgentMessagesBySequences(threadId, replaced.map((message) => message.sequence));
+      this.storage.appendAgentMessage({ threadId, role: 'system', kind: 'summary', content, data: { folded: replaced.map((message) => ({ sequence: message.sequence, role: message.role, kind: message.kind, content: message.content, runId: message.runId, createdAt: message.createdAt })), foldedCount: replaced.length, kept: keep } });
+    }, { resource: 'agent', resourceId: threadId });
+
+    const remaining = this.storage.listAllAgentMessages(threadId);
+    const summary = remaining.find((message) => message.kind === 'summary');
+    return { thread: this.storage.getAgentThread(threadId), summary: summary ?? null, replacedSequences: replaced.map((message) => message.sequence), remainingCount: remaining.length };
+  }
+
+  /** Read-only project summary built from task statistics; failures stay visible, nothing is invented. */
+  projectSummary(projectId: string): ProjectSummary {
+    const stats = this.storage.projectSummary(projectId);
+    return { projectId, ...stats, generatedAt: new Date().toISOString() };
   }
 
   /**

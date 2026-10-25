@@ -192,6 +192,33 @@ export class Storage {
     return { items, nextCursor: items.at(-1)?.sequence ?? after };
   }
 
+  /** The whole thread for deterministic folding; a hard cap keeps a pathological thread from unbounded memory. */
+  listAllAgentMessages(threadId: string, limit = 1000): AgentMessage[] {
+    this.getAgentThread(threadId);
+    return (this.db.prepare('SELECT * FROM agent_messages WHERE thread_id = ? ORDER BY sequence LIMIT ?').all(threadId, limit) as Row[]).map((row) => agentMessage(row));
+  }
+
+  deleteAgentMessagesBySequences(threadId: string, sequences: number[]): void {
+    for (const sequence of sequences) this.db.prepare('DELETE FROM agent_messages WHERE thread_id = ? AND sequence = ?').run(threadId, sequence);
+  }
+
+  /** Read-only statistics for the project summary; no writes, no revision bump. */
+  projectSummary(projectId: string): { taskCount: number; activeTaskCount: number; doneTaskCount: number; overdueTaskCount: number; byStatus: Record<string, number>; byPriority: Record<string, number> } {
+    this.getProject(projectId);
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = this.db.prepare('SELECT status, priority, due_date FROM tasks WHERE project_id = ? AND archived_at IS NULL').all(projectId) as Row[];
+    const byStatus: Record<string, number> = {};
+    const byPriority: Record<string, number> = {};
+    let activeTaskCount = 0; let doneTaskCount = 0; let overdueTaskCount = 0;
+    for (const row of rows) {
+      const status = String(row.status); const priority = String(row.priority);
+      byStatus[status] = (byStatus[status] ?? 0) + 1; byPriority[priority] = (byPriority[priority] ?? 0) + 1;
+      if (status === 'done' || status === 'canceled') doneTaskCount += 1; else activeTaskCount += 1;
+      if (status !== 'done' && status !== 'canceled' && row.due_date && String(row.due_date).slice(0, 10) < today) overdueTaskCount += 1;
+    }
+    return { taskCount: rows.length, activeTaskCount, doneTaskCount, overdueTaskCount, byStatus, byPriority };
+  }
+
   write<T>(operation: () => T, resource: Omit<RevisionRecord, 'revision'> = {}): T {
     this.db.exec('BEGIN IMMEDIATE');
     let result: T;
