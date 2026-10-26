@@ -24,7 +24,7 @@ import { registerJiraRoutes } from './routes/jira.ts';
 
 export interface TaskManagerApp { app: Hono; storage: Storage; agentRuntime: AgentRuntime; chat: ChatService; automationScheduler: AutomationScheduler; jira: JiraAdapter; close: () => void; }
 
-export interface TaskManagerAppOptions { dataDir?: string; accessToken?: string; allowedOrigins?: string[]; agentCommands?: string[]; agentModels?: string[]; agentSkillDirectories?: string[]; agentPermissionModes?: PermissionMode[]; agentStreamMode?: AgentStreamMode; jira?: JiraAdapterOptions; }
+export interface TaskManagerAppOptions { dataDir?: string; accessToken?: string; allowedOrigins?: string[]; agentCommands?: string[]; agentCommandArguments?: string[]; agentModels?: string[]; agentSkillDirectories?: string[]; agentPermissionModes?: PermissionMode[]; agentStreamMode?: AgentStreamMode; jira?: JiraAdapterOptions; }
 
 type WebSession = { csrfToken: string; createdAt: number };
 const sessionCookie = 'taskmanager_session';
@@ -38,7 +38,7 @@ function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
 
 export function createTaskManagerApp(options: TaskManagerAppOptions = {}): TaskManagerApp {
   const storage = new Storage(options.dataDir ?? process.env.TASKMANAGER_DATA_DIR ?? join(process.cwd(), '.data'));
-  const agentRuntime = new AgentRuntime({ allowedCommands: options.agentCommands ?? (process.env.TASKMANAGER_AGENT_COMMANDS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), allowedModels: options.agentModels ?? (process.env.TASKMANAGER_AGENT_MODELS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), skillDirectories: options.agentSkillDirectories ?? (process.env.TASKMANAGER_AGENT_SKILL_DIRS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), permissionModes: options.agentPermissionModes ?? (process.env.TASKMANAGER_AGENT_PERMISSION_MODES?.split(',').map((value) => value.trim()).filter((value): value is PermissionMode => ['read', 'write', 'full'].includes(value)) ?? []), streamMode: options.agentStreamMode, persistence: storage.agentRuntimePersistence() });
+  const agentRuntime = new AgentRuntime({ allowedCommands: options.agentCommands ?? (process.env.TASKMANAGER_AGENT_COMMANDS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), commandArguments: options.agentCommandArguments ?? (process.env.TASKMANAGER_AGENT_ARGS?.split(';').map((value) => value.trim()).filter(Boolean) ?? []), allowedModels: options.agentModels ?? (process.env.TASKMANAGER_AGENT_MODELS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), skillDirectories: options.agentSkillDirectories ?? (process.env.TASKMANAGER_AGENT_SKILL_DIRS?.split(',').map((value) => value.trim()).filter(Boolean) ?? []), permissionModes: options.agentPermissionModes ?? (process.env.TASKMANAGER_AGENT_PERMISSION_MODES?.split(',').map((value) => value.trim()).filter((value): value is PermissionMode => ['read', 'write', 'full'].includes(value)) ?? []), streamMode: options.agentStreamMode, persistence: storage.agentRuntimePersistence() });
   const chat = new ChatService(storage, agentRuntime);
   const automationScheduler = new AutomationScheduler(storage, agentRuntime);
   const jira = new JiraAdapter(options.jira);

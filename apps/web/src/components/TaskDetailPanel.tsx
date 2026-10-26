@@ -5,8 +5,20 @@ import { platforms, priorityLabels, statusLabels } from '../../../../packages/co
 import { api } from '../api';
 import { activityReadKey, readActivityMarker, unreadActivityCount } from '../lib/activityRead';
 import { activityLabel, formatDate, formatTime, initial } from '../lib/format';
-import { ErrorMessage, Markdown, Modal, StatusDot } from './shared';
+import { AttachmentPreview, ErrorMessage, Markdown, Modal, StatusDot } from './shared';
 import { AiChatPanel } from './AiChatPanel';
+
+type CompletionResult = { task: Task; nextTask: Task | null };
+
+// TaskClient returns the raw response body, so the completion payload arrives nested under `item`.
+function completionResult(value: unknown): CompletionResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const item = (value as { item?: unknown }).item;
+  if (!item || typeof item !== 'object') return null;
+  const candidate = item as Partial<CompletionResult>;
+  if (!candidate.task || typeof candidate.task !== 'object') return null;
+  return { task: candidate.task, nextTask: candidate.nextTask ?? null };
+}
 
 export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, onCopy, onRefresh }: { taskId: string; revision?: number; allTasks: Task[]; onClose: () => void; onEdit: (task: Task) => void; onCopy: (task: Task) => Promise<void>; onRefresh: () => Promise<unknown> }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -26,6 +38,7 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
   const [sessionBusy, setSessionBusy] = useState(false);
   const [attachmentBusy, setAttachmentBusy] = useState<string | null>(null);
   const [copyBusy, setCopyBusy] = useState(false);
+  const [completionNotice, setCompletionNotice] = useState<string | null>(null);
   const [relationTasks, setRelationTasks] = useState<Record<string, Task>>({});
   const [commentsCursor, setCommentsCursor] = useState<string | null>(null);
   const [activitiesCursor, setActivitiesCursor] = useState<string | null>(null);
@@ -184,7 +197,15 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
   async function mutateTask(action: 'archive-task' | 'restore-task' | 'complete-task' | 'delete-task', operation: () => Promise<unknown>) {
     if (!detail) return;
     setError(null);
-    try { await operation(); if (action === 'delete-task') { onClose(); return; } await reload(); } catch (value) { setError(value); }
+    try {
+      const result = await operation();
+      if (action === 'delete-task') { onClose(); return; }
+      if (action === 'complete-task') {
+        const completion = completionResult(result);
+        if (completion) setCompletionNotice(completion.nextTask ? `已完成，并生成下一期 ${completion.nextTask.identifier}（截止 ${completion.nextTask.dueDate ?? '未设置'}）。` : completion.task.recurrence ? '已完成；该任务配置了重复但没有截止日期，因此没有生成下一期。' : '已完成。');
+      }
+      await reload();
+    } catch (value) { setError(value); }
   }
 
   const task = detail?.task;
@@ -206,6 +227,7 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
             {task.archivedAt && <button className="icon-button danger-button" title="永久删除" aria-label="永久删除" onClick={() => { if (window.confirm('永久删除这个任务？此操作无法撤销。')) void mutateTask('delete-task', () => api.deleteTask(task)); }}><Trash2 size={16} /></button>}
           </div>
         </div>
+        {completionNotice && <p className="notice" role="status"><span>{completionNotice}</span><button className="button secondary" onClick={() => setCompletionNotice(null)}>知道了</button></p>}
         <div className="detail-grid">
           <div className="detail-main">
             <div className="detail-heading"><span className="task-id">{task.identifier}</span><h2>{task.title}</h2><div className="detail-submeta"><span>创建于 {formatTime(task.createdAt)}</span><span>·</span><span>更新于 {formatTime(task.updatedAt)}</span>{task.assignee && <><span>·</span><span>负责人 {task.assignee}</span></>}</div></div>
@@ -230,7 +252,7 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
           </div>
           <aside className="detail-aside">
             <section className="aside-section"><h3>任务信息</h3><DetailField label="状态"><span className="inline-status"><StatusDot status={task.status} />{statusLabels[task.status]}</span></DetailField><DetailField label="优先级"><span className={`priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span></DetailField><DetailField label="开始日期">{formatDate(task.startDate) || '未设置'}</DetailField><DetailField label="截止日期">{formatDate(task.dueDate) || '未设置'}</DetailField><DetailField label="重复">{formatRecurrence(task.recurrence)}</DetailField><DetailField label="标签">{task.labels.length ? <span className="detail-labels">{task.labels.map((label) => <span className="label-chip" key={label}>{label}</span>)}</span> : '未设置'}</DetailField></section>
-            <section className="aside-section"><div className="section-heading"><h3>附件 <span>{detail.attachments.length}</span></h3><label className="icon-button tiny upload-button" title="上传附件" aria-label="上传附件"><Upload size={15} /><input type="file" onChange={(event) => void upload(event)} disabled={uploadBusy} /></label></div>{detail.attachments.length === 0 ? <p className="muted-copy">没有附件</p> : <div className="attachment-list">{detail.attachments.map((item) => <div className="attachment-row" key={item.id}><a href={api.attachmentUrl(item)} target="_blank" rel="noreferrer"><Paperclip size={14} /><span>{item.filename}</span><small>{Math.ceil(item.size / 1024)} KB</small></a><button className="icon-button tiny danger-button" title="删除附件" aria-label="删除附件" onClick={() => void deleteAttachment(item.id)} disabled={attachmentBusy === item.id}><Trash2 size={13} /></button></div>)}</div>}</section>
+            <section className="aside-section"><div className="section-heading"><h3>附件 <span>{detail.attachments.length}</span></h3><label className="icon-button tiny upload-button" title="上传附件" aria-label="上传附件"><Upload size={15} /><input type="file" onChange={(event) => void upload(event)} disabled={uploadBusy} /></label></div>{detail.attachments.length === 0 ? <p className="muted-copy">没有附件</p> : <div className="attachment-list">{detail.attachments.map((item) => <div className="attachment-row" key={item.id}>{item.contentType.startsWith('image/') && <AttachmentPreview src={api.attachmentUrl(item)} filename={item.filename} contentType={item.contentType} />}<a href={api.attachmentUrl(item)} target="_blank" rel="noreferrer"><Paperclip size={14} /><span>{item.filename}</span><small>{Math.ceil(item.size / 1024)} KB</small></a><button className="icon-button tiny danger-button" title="删除附件" aria-label="删除附件" onClick={() => void deleteAttachment(item.id)} disabled={attachmentBusy === item.id}><Trash2 size={13} /></button></div>)}</div>}</section>
             <section className="aside-section"><div className="section-heading"><h3>Agent 会话 <span>{task.sessions.length}</span></h3></div><form className="session-form" onSubmit={(event) => void addSession(event)}><select aria-label="会话平台" value={sessionPlatform} onChange={(event) => setSessionPlatform(event.target.value as Session['platform'])} disabled={sessionBusy || !!task.archivedAt}>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select><input aria-label="会话 ID" value={sessionId} onChange={(event) => setSessionId(event.target.value)} placeholder="粘贴会话 ID" disabled={sessionBusy || !!task.archivedAt} /><button className="icon-button tiny" title="关联会话" aria-label="关联会话" disabled={sessionBusy || !sessionId.trim() || !!task.archivedAt}><Plus size={15} /></button></form>{task.sessions.length === 0 ? <p className="muted-copy">没有关联会话</p> : <div className="session-list">{task.sessions.map((session) => <div className="session-row" key={session.id}><span className="session-platform">{session.platform}</span><span title={session.sessionId}>{session.sessionId}</span><button className="icon-button tiny danger-button" title="移除会话" aria-label="移除会话" onClick={() => void removeSession(session)} disabled={sessionBusy}><Trash2 size={13} /></button></div>)}</div>}</section>
             <AiChatPanel task={task} attachments={detail.attachments} />
             <section className="aside-section">

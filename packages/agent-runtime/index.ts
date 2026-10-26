@@ -20,14 +20,19 @@ export interface AgentRuntimePersistence {
   saveRunAndEvent(run: AgentRun, event: AgentEvent): void;
   eventsSince(runId: string, sequence: number): AgentEvent[];
 }
-export type AgentRuntimeOptions = { allowedCommands: string[]; allowedModels?: string[]; skillDirectories?: string[]; permissionModes?: PermissionMode[]; maxHistory?: number; killGraceMs?: number; streamMode?: AgentStreamMode; persistence?: AgentRuntimePersistence };
+export type AgentRuntimeOptions = { allowedCommands: string[]; commandArguments?: string[]; allowedModels?: string[]; skillDirectories?: string[]; permissionModes?: PermissionMode[]; maxHistory?: number; killGraceMs?: number; streamMode?: AgentStreamMode; persistence?: AgentRuntimePersistence };
 export type AgentEventListener = (event: AgentEvent) => void;
 
 export class AgentRuntimeError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'AgentRuntimeError'; }
 }
 
-type ActiveRun = { run: AgentRun; process: ChildProcessWithoutNullStreams; events: AgentEvent[]; nextSequence: number; decoder: AgentStreamDecoder; cancelTimer?: ReturnType<typeof setTimeout> };
+/** Splits a configured command line such as `claude -p --output-format stream-json` into argv without invoking a shell. */
+export function parseCommandLine(value: string): string[] {
+  return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(["'])(.*)\1$/, '$2')) ?? [];
+}
+
+type ActiveRun = { run: AgentRun; process: ChildProcessWithoutNullStreams; events: AgentEvent[]; nextSequence: number; decoder: AgentStreamDecoder; cancelTimer?: ReturnType<typeof setTimeout>; cancelled?: boolean };
 
 export class AgentRuntime {
   private readonly allowedCommands: Set<string>;
@@ -36,6 +41,7 @@ export class AgentRuntime {
   private readonly killGraceMs: number;
   private readonly skillsById = new Map<string, AgentSkill & { path: string }>();
   private readonly permissionModes: Set<PermissionMode>;
+  private readonly defaultArgs = new Map<string, string[]>();
   private readonly streamMode: AgentStreamMode;
   private readonly active = new Map<string, ActiveRun>();
   private readonly history = new Map<string, AgentEvent[]>();
@@ -47,6 +53,12 @@ export class AgentRuntime {
     this.allowedCommands = new Set(options.allowedCommands);
     this.allowedModels = new Set(options.allowedModels ?? []);
     this.permissionModes = new Set(options.permissionModes?.length ? options.permissionModes : ['read']);
+    // A host such as `claude -p --output-format stream-json` needs fixed argv on every turn; keeping it in
+    // the allowlist means the chat path never has to guess flags, and the command stays a single executable.
+    for (const entry of options.commandArguments ?? []) {
+      const [command, ...args] = parseCommandLine(entry);
+      if (command && this.allowedCommands.has(command) && args.length) this.defaultArgs.set(command, args);
+    }
     this.maxHistory = Math.max(1, options.maxHistory ?? 1000);
     this.killGraceMs = Math.max(100, options.killGraceMs ?? 2000);
     this.persistence = options.persistence;
@@ -56,14 +68,20 @@ export class AgentRuntime {
   }
 
   skills(): AgentSkill[] { return [...this.skillsById.values()].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, name, description }) => ({ id, name, description })); }
-  capabilities() { return { commands: [...this.allowedCommands], models: [...this.allowedModels], permissionModes: [...this.permissionModes], skills: this.skills(), stream: this.streamMode }; }
+  capabilities() { return { commands: [...this.allowedCommands], models: [...this.allowedModels], permissionModes: [...this.permissionModes], skills: this.skills(), stream: this.streamMode, commandArguments: Object.fromEntries([...this.allowedCommands].map((command) => [command, [...(this.defaultArgs.get(command) ?? [])]])) }; }
 
-  start(request: AgentRunRequest): AgentRun {
+  /** Merges the configured argv with the per-run args, so an explicit request can still extend the invocation. */
+  resolvedArgs(request: AgentRunRequest): string[] { return [...(this.defaultArgs.get(request.command) ?? []), ...(request.args ?? [])]; }
+
+  start(request: AgentRunRequest, options: { resolvedArgs?: boolean } = {}): AgentRun {
     this.validateRequest(request);
     if (this.activeForSession(request.sessionId)) throw new AgentRuntimeError('SESSION_BUSY', `Session ${request.sessionId} already has a running agent`);
-    const run: AgentRun = { runId: randomUUID(), sessionId: request.sessionId, status: 'running', request: { ...request, args: [...(request.args ?? [])], skillIds: [...(request.skillIds ?? [])] }, startedAt: new Date().toISOString() };
+    // Continuation reuses the argv already resolved for the previous run; merging the configured
+    // default argv again would duplicate host flags such as `-p --output-format stream-json`.
+    const args = options.resolvedArgs ? [...(request.args ?? [])] : this.resolvedArgs(request);
+    const run: AgentRun = { runId: randomUUID(), sessionId: request.sessionId, status: 'running', request: { ...request, args, skillIds: [...(request.skillIds ?? [])] }, startedAt: new Date().toISOString() };
     const selectedSkills = (request.skillIds ?? []).map((skillId) => this.skillsById.get(skillId)!);
-    const child = spawn(request.command, request.args ?? [], { cwd: request.cwd, env: { ...process.env, ...request.env, ...(selectedSkills.length ? { TASKMANAGER_SKILL_IDS: selectedSkills.map((skill) => skill.id).join(','), TASKMANAGER_SKILL_DIRS: selectedSkills.map((skill) => skill.path).join(delimiter) } : {}) }, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(request.command, run.request.args ?? [], { cwd: request.cwd, env: { ...process.env, ...request.env, ...(selectedSkills.length ? { TASKMANAGER_SKILL_IDS: selectedSkills.map((skill) => skill.id).join(','), TASKMANAGER_SKILL_DIRS: selectedSkills.map((skill) => skill.path).join(delimiter) } : {}) }, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const state: ActiveRun = { run, process: child, events: [], nextSequence: 1, decoder: createStreamDecoder(this.streamMode) };
     this.active.set(run.runId, state); this.append(state, { type: 'started', data: JSON.stringify({ model: request.model ?? null, permissionMode: request.permissionMode ?? 'read', skillIds: request.skillIds ?? [] }) });
     child.stdout.on('data', (chunk: Buffer) => { if (state.run.status === 'running') { const items = state.decoder.push(chunk.toString('utf8')); this.append(state, { type: 'stdout', data: chunk.toString('utf8'), ...(items.length ? { items } : {}) }); } });
@@ -73,7 +91,8 @@ export class AgentRuntime {
       if (state.run.status !== 'running') return;
       const trailing = state.decoder.flush();
       if (trailing.length) this.append(state, { type: 'stdout', items: trailing });
-      this.finish(state, code === 0 ? 'completed' : 'failed', code, signal);
+      // A cancelled run must report `cancelled`, even though the signal also produces a non-zero exit code.
+      this.finish(state, state.cancelled ? 'cancelled' : code === 0 ? 'completed' : 'failed', code, signal);
     });
     if (request.input !== undefined) { child.stdin.write(request.input); child.stdin.end(); }
     return { ...run, request: { ...run.request, args: [...(run.request.args ?? [])], skillIds: [...(run.request.skillIds ?? [])] } };
@@ -82,7 +101,7 @@ export class AgentRuntime {
   continue(runId: string, input?: string): AgentRun {
     const previous = this.get(runId);
     if (!previous || previous.status === 'running') throw new AgentRuntimeError('RUN_NOT_FOUND', `Run ${runId} is not available for continuation`);
-    return this.start({ ...previous.request, input });
+    return this.start({ ...previous.request, args: [...(previous.request.args ?? [])], input }, { resolvedArgs: true });
   }
 
   cancel(runId: string): AgentRun {
@@ -93,8 +112,9 @@ export class AgentRuntime {
       return { ...completed };
     }
     if (state.run.status !== 'running') return { ...state.run };
-    state.process.kill('SIGTERM');
-    state.cancelTimer = setTimeout(() => { if (state.run.status === 'running') state.process.kill('SIGKILL'); }, this.killGraceMs);
+    state.cancelled = true;
+    this.killTree(state.process, 'SIGTERM');
+    state.cancelTimer = setTimeout(() => { if (state.run.status === 'running') this.killTree(state.process, 'SIGKILL'); }, this.killGraceMs);
     return { ...state.run };
   }
 
@@ -113,7 +133,7 @@ export class AgentRuntime {
     return () => { listeners.delete(listener); if (!listeners.size) this.subscribers.delete(runId); };
   }
   activeForSession(sessionId: string): AgentRun | null { for (const state of this.active.values()) if (state.run.sessionId === sessionId && state.run.status === 'running') return { ...state.run }; return null; }
-  shutdown(): void { for (const state of this.active.values()) { state.process.kill('SIGTERM'); state.run.status = 'interrupted'; state.run.finishedAt = new Date().toISOString(); this.append(state, { type: 'interrupted', signal: 'SIGTERM' }); this.completed.set(state.run.runId, { ...state.run }); } this.active.clear(); this.subscribers.clear(); }
+  shutdown(): void { for (const state of this.active.values()) { this.killTree(state.process, 'SIGTERM'); state.run.status = 'interrupted'; state.run.finishedAt = new Date().toISOString(); this.append(state, { type: 'interrupted', signal: 'SIGTERM' }); this.completed.set(state.run.runId, { ...state.run }); } this.active.clear(); this.subscribers.clear(); }
 
   private validateRequest(request: AgentRunRequest) {
     if (!request.sessionId.trim()) throw new AgentRuntimeError('INVALID_SESSION', 'sessionId is required');
@@ -147,6 +167,14 @@ export class AgentRuntime {
     state.events.push(event); if (state.events.length > this.maxHistory) state.events.splice(0, state.events.length - this.maxHistory); this.history.set(state.run.runId, state.events.map(cloneEvent));
     for (const listener of this.subscribers.get(state.run.runId) ?? []) { try { listener({ ...event }); } catch { /* A disconnected subscriber cannot affect the run. */ } }
   }
+  /** The run is spawned detached, so its pid is the process group id; signalling only the child would leave host CLIs alive. */
+  private killTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
+    if (typeof child.pid === 'number') {
+      try { process.kill(-child.pid, signal); return; } catch { /* fall back to the direct child when the group is gone */ }
+    }
+    child.kill(signal);
+  }
+
   private finish(state: ActiveRun, status: AgentRun['status'], code: number | null, signal: NodeJS.Signals | null, error?: string) {
     if (state.run.status !== 'running') return;
     if (state.cancelTimer) clearTimeout(state.cancelTimer);

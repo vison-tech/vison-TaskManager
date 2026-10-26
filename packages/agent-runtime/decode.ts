@@ -12,6 +12,16 @@ export interface AgentStreamDecoder {
 
 const text = (value: unknown): string => typeof value === 'string' ? value : value === null || value === undefined ? '' : JSON.stringify(value);
 
+// Claude Code emits `message.content` as content blocks; only text blocks are conversation, the rest is metadata.
+const blocks = (value: unknown): string => Array.isArray(value)
+  ? value.map((block) => {
+    if (typeof block === 'string') return block;
+    if (!block || typeof block !== 'object') return '';
+    const record = block as Record<string, unknown>;
+    return record.type === 'text' && typeof record.text === 'string' ? record.text : '';
+  }).filter(Boolean).join('\n')
+  : text(value);
+
 // Producer-specific event names are mapped onto the vendor-neutral kind vocabulary.
 // Anything unrecognized degrades to plain assistant prose instead of being dropped.
 const map: Record<string, { role: AgentMessageRole; kind: AgentMessageKind }> = {
@@ -35,9 +45,15 @@ function normalize(value: unknown): AgentStreamItem | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  // Session metadata (init/hooks/usage/result) carries no conversation; rendering it would bury the actual reply.
+  if (type === 'result' || type === 'system') return null;
+  const message = record.message && typeof record.message === 'object' ? record.message as Record<string, unknown> : null;
+  const raw = message
+    ? (message.content ?? message.message ?? message.text ?? '')
+    : (record.text ?? record.message ?? record.content ?? record.output ?? record.command ?? record.summary ?? '');
+  const content = Array.isArray(raw) || typeof raw === 'string' ? blocks(raw) : text(raw);
   const shape = map[type] ?? { role: 'assistant' as const, kind: 'message' as const };
-  const content = text(record.text ?? record.message ?? record.content ?? record.output ?? record.command ?? record.summary ?? '');
-  const detail = record.detail ?? record.data ?? record.result;
+  const detail = message ?? record.detail ?? record.data ?? (record.result === undefined ? undefined : record.result);
   if (!content.trim() && detail === undefined) return null;
   return { role: shape.role, kind: shape.kind, content: content.slice(0, 65_536), ...(detail === undefined ? {} : { data: detail }) };
 }
