@@ -17,6 +17,7 @@ import { TaskModal } from './components/TaskModal';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { PreferencesModal } from './components/PreferencesModal';
 import { matchesSearch } from './lib/format';
+import { planBoardDrop, planBoardKeyboardMove, planBoardKeyboardReorder } from './lib/boardDrag';
 import { statusLabelsEn, useLocale } from './lib/locale';
 import { defaultProjectPreferences, readProjectPreferences, writeProjectPreferences, type CardDisplayPreferences, type ProjectView, projectPreferencesKey } from './lib/projectPreferences';
 
@@ -118,39 +119,22 @@ function App() {
   }
 
   async function handleDragEnd(event: DragEndEvent) {
-    const taskId = String(event.active.id);
-    const dragged = visibleTasks.find((task) => task.id === taskId);
-    if (!dragged || !event.over) return;
-    const overData = event.over.data.current as { status?: Status; taskId?: string } | undefined;
-    const targetStatus = overData?.status ?? visibleTasks.find((task) => task.id === overData?.taskId)?.status;
-    if (!targetStatus) return;
-    const targetId = overData?.taskId;
-    if (targetStatus === dragged.status && targetId === dragged.id) return;
-    const sameColumn = visibleTasks.filter((task) => task.status === targetStatus && task.id !== dragged.id).sort((a, b) => a.sortOrder - b.sortOrder);
-    const targetIndex = targetId ? Math.max(0, sameColumn.findIndex((task) => task.id === targetId)) : sameColumn.length;
-    const previous = sameColumn[targetIndex - 1];
-    const target = sameColumn[targetIndex];
-    const sortOrder = target ? (previous ? (previous.sortOrder + target.sortOrder) / 2 : target.sortOrder - 1) : (previous?.sortOrder ?? -1) + 1;
-    await runAction('drag', () => api.updateTask(dragged, { status: targetStatus, sortOrder }), { label: '任务已移动', task: dragged, patch: { status: dragged.status, sortOrder: dragged.sortOrder } });
+    const dragged = visibleTasks.find((task) => task.id === String(event.active.id)) ?? null;
+    const plan = planBoardDrop(dragged, visibleTasks, event.over);
+    if (!plan) return;
+    await runAction('drag', () => api.updateTask(dragged!, plan), { label: '任务已移动', task: dragged!, patch: { status: dragged!.status, sortOrder: dragged!.sortOrder } });
   }
 
   async function moveTaskByKeyboard(task: Task, direction: -1 | 1) {
-    const currentIndex = statusOrder.indexOf(task.status); const nextStatus = statusOrder[currentIndex + direction];
-    if (!nextStatus) return;
-    const nextTasks = tasks.filter((item) => item.projectId === task.projectId && item.status === nextStatus && !item.archivedAt);
-    const nextSortOrder = nextTasks.reduce((max, item) => Math.max(max, item.sortOrder), -1) + 1;
-    await runAction('keyboard-move', () => api.updateTask(task, { status: nextStatus, sortOrder: nextSortOrder }), { label: '任务已移动', task, patch: { status: task.status, sortOrder: task.sortOrder } });
+    const patch = planBoardKeyboardMove(tasks, task, direction);
+    if (!patch) return;
+    await runAction('keyboard-move', () => api.updateTask(task, patch), { label: '任务已移动', task, patch: { status: task.status, sortOrder: task.sortOrder } });
   }
 
   async function reorderTaskByKeyboard(task: Task, direction: -1 | 1) {
-    const siblings = tasks.filter((item) => item.projectId === task.projectId && item.status === task.status && !item.archivedAt).sort((a, b) => a.sortOrder - b.sortOrder);
-    const index = siblings.findIndex((item) => item.id === task.id);
-    const targetIndex = index + direction;
-    if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
-    const target = siblings[targetIndex];
-    const neighbor = siblings[targetIndex + direction];
-    const sortOrder = neighbor ? (target.sortOrder + neighbor.sortOrder) / 2 : target.sortOrder + direction;
-    await runAction('keyboard-reorder', () => api.updateTask(task, { sortOrder }), { label: '任务顺序已更新', task, patch: { sortOrder: task.sortOrder } });
+    const patch = planBoardKeyboardReorder(tasks, task, direction);
+    if (!patch) return;
+    await runAction('keyboard-reorder', () => api.updateTask(task, patch), { label: '任务顺序已更新', task, patch: { sortOrder: task.sortOrder } });
   }
 
   async function createTask(input: TaskInput) {

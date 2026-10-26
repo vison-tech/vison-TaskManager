@@ -53,6 +53,12 @@ npm run build
 npm test
 ```
 
+纯逻辑组件的 jsdom 测试与 Node 回归分离运行，互不阻塞（`jsdom` 与 `@testing-library/react` 为 dev 依赖）：
+
+```bash
+npm run test:components
+```
+
 浏览器回归使用隔离的内存数据库和随机端口，不修改本地任务数据：
 
 ```bash

@@ -3,6 +3,7 @@ import { Check, Loader2, MessageSquarePlus, Paperclip, RefreshCw, Send, Square, 
 import type { AgentCatalog, AgentMessage, AgentThread, Attachment, Task } from '../../../../packages/contracts/index.ts';
 import { api } from '../api';
 import { expandSlashCommand } from '../lib/agentCompletions';
+import { mergeAgentMessages } from '../lib/agentMessages';
 import { AgentComposer } from './AgentComposer';
 import { ErrorMessage } from './shared';
 
@@ -91,7 +92,7 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
     const listener = (frame: MessageEvent<string>) => {
       try {
         const message = JSON.parse(frame.data) as AgentMessage;
-        setMessages((current) => current.some((item) => item.sequence === message.sequence) ? current : [...current, message]);
+        setMessages((current) => mergeAgentMessages(current, [message]));
         if (message.role === 'system' && message.kind !== 'error') setRunning(false);
       } catch { /* Ignore malformed frames; the next fetch remains authoritative. */ }
     };
