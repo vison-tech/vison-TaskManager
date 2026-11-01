@@ -6,6 +6,7 @@ import { expandSlashCommand } from '../lib/agentCompletions';
 import { mergeAgentMessages } from '../lib/agentMessages';
 import { AgentComposer } from './AgentComposer';
 import { ErrorMessage } from './shared';
+import { attachmentPath } from '../lib/attachmentLinks';
 
 function contextPrompt(task: Task, attachments: Attachment[], selectedAttachmentIds: string[], input: string): string {
   const selected = attachments.filter((item) => selectedAttachmentIds.includes(item.id));
@@ -14,10 +15,11 @@ function contextPrompt(task: Task, attachments: Attachment[], selectedAttachment
     `状态：${task.status}；优先级：${task.priority}`,
     `标签：${task.labels.length ? task.labels.join(', ') : '无'}`,
     `描述：${task.description || '无'}`,
+    `开发上下文：${JSON.stringify(task.developmentContext)}（分支信息仅供参考，不自动切换分支）`,
   ];
   if (selected.length) {
     lines.push('选中的附件：');
-    for (const item of selected) lines.push(`- ${item.filename} (${item.contentType}, ${item.size} bytes): ${api.attachmentUrl(item)}`);
+    for (const item of selected) lines.push(`- ${item.filename} (${item.contentType}, ${item.size} bytes): ${attachmentPath(item.id)}`);
   }
   return `${lines.join('\n')}\n\n用户请求：\n${input.trim()}`;
 }
@@ -113,7 +115,10 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
   }
 
   // Picking a mention adds the skill to the run settings, so the inserted text and the request agree.
-  function rememberCandidate(candidate: { skillId?: string }) { if (candidate.skillId) setSkillIds((current) => current.includes(candidate.skillId!) ? current : [...current, candidate.skillId!]); }
+  function rememberCandidate(candidate: { id: string; skillId?: string }) {
+    if (candidate.skillId) setSkillIds((current) => current.includes(candidate.skillId!) ? current : [...current, candidate.skillId!]);
+    if (candidate.id.startsWith("attachment:")) { const id = candidate.id.slice("attachment:".length); setSelectedAttachmentIds((current) => current.includes(id) ? current : [...current, id]); }
+  }
 
   async function send(event?: FormEvent) {
     event?.preventDefault();
@@ -124,7 +129,7 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
     try {
       const active = thread ?? await api.createAgentThread({ projectId: task.projectId, taskId: task.id, sessionId, title: task.identifier, command: command || null, model: model || null, permissionMode, skillIds });
       setThread(active);
-      const result = await api.agentTurn(active.id, { input: contextPrompt(task, attachments, selectedAttachmentIds, text), command: command || undefined, model: model || undefined, permissionMode, skillIds });
+      const result = await api.agentTurn(active.id, { input: contextPrompt(task, attachments, selectedAttachmentIds, text), attachmentIds: selectedAttachmentIds, command: command || undefined, model: model || undefined, permissionMode, skillIds });
       setLastRunId((result.run as { runId?: string } | null)?.runId ?? null);
       setRunning(true);
       setInput('');
@@ -175,7 +180,7 @@ export function AiChatPanel({ task, attachments = [] }: { task: Task; attachment
         {catalog.models.length > 0 && <label>模型<select value={model} onChange={(event) => setModel(event.target.value)} disabled={running}><option value="">默认</option>{catalog.models.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
         <label>权限<select value={permissionMode} onChange={(event) => setPermissionMode(event.target.value as typeof permissionMode)} disabled={running}>{catalog.permissionModes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         {catalog.skills.length > 0 && <div className="agent-skills"><span>技能</span>{catalog.skills.map((skill) => <label key={skill.id}><input type="checkbox" checked={skillIds.includes(skill.id)} onChange={() => toggleSkill(skill.id)} disabled={running} />{skill.name}</label>)}</div>}
-        {attachments.length > 0 && <div className="agent-attachments"><span>加入上下文的附件</span>{attachments.map((attachment) => <label key={attachment.id}><input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment)} disabled={running} /><Paperclip size={12} />{attachment.filename}</label>)}<small>仅发送文件名、类型、大小和本地 API 链接；运行时是否能读取由命令权限决定。</small></div>}
+        {attachments.length > 0 && <div className="agent-attachments"><span>加入上下文的附件</span>{attachments.map((attachment) => <label key={attachment.id}><input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment)} disabled={running} /><Paperclip size={12} />{attachment.filename}</label>)}<small>发送所选 UTF-8 文本附件的正文；最多 10 个，单个 64 KiB，总计 256 KiB。图片、PDF 等二进制附件暂不支持。</small></div>}
       </details>
       <div className="agent-chat-log" ref={logRef} aria-label="AI 对话记录">
         {messages.length === 0 ? <p className="muted-copy">还没有消息。输入任务请求开始对话。</p> : messages.map((message) => <article className={`agent-chat-message ${message.role} kind-${message.kind}`} key={message.id}>

@@ -1,12 +1,14 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { Archive, Check, CheckCheck, Copy, FileText, MessageSquare, Paperclip, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
-import type { Activity, Comment, Relation, Session, Task, TaskDetail } from '../../../../packages/contracts/index.ts';
-import { platforms, priorityLabels, statusLabels } from '../../../../packages/contracts/index.ts';
+import type { Activity, Comment, Relation, Task, TaskDetail } from '../../../../packages/contracts/index.ts';
+import { priorityLabels, statusLabels } from '../../../../packages/contracts/index.ts';
 import { api } from '../api';
 import { activityReadKey, readActivityMarker, unreadActivityCount } from '../lib/activityRead';
 import { activityLabel, formatDate, formatTime, initial } from '../lib/format';
 import { AttachmentPreview, ErrorMessage, Markdown, Modal, StatusDot } from './shared';
 import { AiChatPanel } from './AiChatPanel';
+import { TaskSessions } from './TaskSessions';
+import { attachmentPath } from '../lib/attachmentLinks';
 
 type CompletionResult = { task: Task; nextTask: Task | null };
 
@@ -33,9 +35,6 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
   const [relationTargetId, setRelationTargetId] = useState('');
   const [relationType, setRelationType] = useState<Relation['type']>('related');
   const [relationBusy, setRelationBusy] = useState(false);
-  const [sessionPlatform, setSessionPlatform] = useState<Session['platform']>('codex');
-  const [sessionId, setSessionId] = useState('');
-  const [sessionBusy, setSessionBusy] = useState(false);
   const [attachmentBusy, setAttachmentBusy] = useState<string | null>(null);
   const [copyBusy, setCopyBusy] = useState(false);
   const [completionNotice, setCompletionNotice] = useState<string | null>(null);
@@ -128,7 +127,8 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
       const created = await api.addComment(detail.task, comment.trim());
       if (commentFile) {
         const attachment = await api.uploadAttachment(detail.task, commentFile, created.id);
-        const link = commentFile.type.startsWith('image/') ? `![${commentFile.name}](${api.attachmentUrl(attachment)})` : `[${commentFile.name}](${api.attachmentUrl(attachment)})`;
+        const url = attachmentPath(attachment.id);
+        const link = commentFile.type.startsWith('image/') ? `![${commentFile.name}](${url})` : `[${commentFile.name}](${url})`;
         await api.updateComment(created, `${created.body}\n\n${link}`);
       }
       setComment(''); setCommentFile(null); await reload();
@@ -159,19 +159,6 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
     if (!detail || !window.confirm('移除这条任务关联？')) return;
     setRelationBusy(true);
     try { await api.removeRelation(detail.task, relation); await reload(); } catch (value) { setError(value); } finally { setRelationBusy(false); }
-  }
-
-  async function addSession(event: FormEvent) {
-    event.preventDefault();
-    if (!detail || detail.task.archivedAt || !sessionId.trim()) return;
-    setSessionBusy(true);
-    try { await api.addSession(detail.task, { platform: sessionPlatform, sessionId: sessionId.trim() }); setSessionId(''); await reload(); } catch (value) { setError(value); } finally { setSessionBusy(false); }
-  }
-
-  async function removeSession(session: Session) {
-    if (!detail || !window.confirm('移除这个 Agent 会话关联？')) return;
-    setSessionBusy(true);
-    try { await api.removeSession(detail.task, session); await reload(); } catch (value) { setError(value); } finally { setSessionBusy(false); }
   }
 
   async function copyTask() {
@@ -252,8 +239,9 @@ export function TaskDetailPanel({ taskId, revision, allTasks, onClose, onEdit, o
           </div>
           <aside className="detail-aside">
             <section className="aside-section"><h3>任务信息</h3><DetailField label="状态"><span className="inline-status"><StatusDot status={task.status} />{statusLabels[task.status]}</span></DetailField><DetailField label="优先级"><span className={`priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span></DetailField><DetailField label="开始日期">{formatDate(task.startDate) || '未设置'}</DetailField><DetailField label="截止日期">{formatDate(task.dueDate) || '未设置'}</DetailField><DetailField label="重复">{formatRecurrence(task.recurrence)}</DetailField><DetailField label="标签">{task.labels.length ? <span className="detail-labels">{task.labels.map((label) => <span className="label-chip" key={label}>{label}</span>)}</span> : '未设置'}</DetailField></section>
+            {task.developmentContext && <section className="aside-section"><h3>开发工作区</h3><DetailField label="类型">{task.developmentContext.type === 'worktree' ? 'Worktree' : '分支'}</DetailField>{task.developmentContext.branch && <DetailField label="分支">{task.developmentContext.branch}</DetailField>}{task.developmentContext.path && <p className="muted-copy" style={{ overflowWrap: 'anywhere' }}>{task.developmentContext.path}</p>}</section>}
             <section className="aside-section"><div className="section-heading"><h3>附件 <span>{detail.attachments.length}</span></h3><label className="icon-button tiny upload-button" title="上传附件" aria-label="上传附件"><Upload size={15} /><input type="file" onChange={(event) => void upload(event)} disabled={uploadBusy} /></label></div>{detail.attachments.length === 0 ? <p className="muted-copy">没有附件</p> : <div className="attachment-list">{detail.attachments.map((item) => <div className="attachment-row" key={item.id}>{item.contentType.startsWith('image/') && <AttachmentPreview src={api.attachmentUrl(item)} filename={item.filename} contentType={item.contentType} />}<a href={api.attachmentUrl(item)} target="_blank" rel="noreferrer"><Paperclip size={14} /><span>{item.filename}</span><small>{Math.ceil(item.size / 1024)} KB</small></a><button className="icon-button tiny danger-button" title="删除附件" aria-label="删除附件" onClick={() => void deleteAttachment(item.id)} disabled={attachmentBusy === item.id}><Trash2 size={13} /></button></div>)}</div>}</section>
-            <section className="aside-section"><div className="section-heading"><h3>Agent 会话 <span>{task.sessions.length}</span></h3></div><form className="session-form" onSubmit={(event) => void addSession(event)}><select aria-label="会话平台" value={sessionPlatform} onChange={(event) => setSessionPlatform(event.target.value as Session['platform'])} disabled={sessionBusy || !!task.archivedAt}>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select><input aria-label="会话 ID" value={sessionId} onChange={(event) => setSessionId(event.target.value)} placeholder="粘贴会话 ID" disabled={sessionBusy || !!task.archivedAt} /><button className="icon-button tiny" title="关联会话" aria-label="关联会话" disabled={sessionBusy || !sessionId.trim() || !!task.archivedAt}><Plus size={15} /></button></form>{task.sessions.length === 0 ? <p className="muted-copy">没有关联会话</p> : <div className="session-list">{task.sessions.map((session) => <div className="session-row" key={session.id}><span className="session-platform">{session.platform}</span><span title={session.sessionId}>{session.sessionId}</span><button className="icon-button tiny danger-button" title="移除会话" aria-label="移除会话" onClick={() => void removeSession(session)} disabled={sessionBusy}><Trash2 size={13} /></button></div>)}</div>}</section>
+            <TaskSessions key={task.id} task={task} onRefresh={reload} />
             <AiChatPanel task={task} attachments={detail.attachments} />
             <section className="aside-section">
               <div className="section-heading"><h3>关联任务 <span>{detail.relations.length}</span></h3></div>

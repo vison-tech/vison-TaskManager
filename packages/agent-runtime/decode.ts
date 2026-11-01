@@ -46,7 +46,9 @@ function normalize(value: unknown): AgentStreamItem | null {
   const record = value as Record<string, unknown>;
   const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
   // Session metadata (init/hooks/usage/result) carries no conversation; rendering it would bury the actual reply.
-  if (type === 'result' || type === 'system') return null;
+  if (type === 'result') return record.is_error === true ? { role: 'system', kind: 'error', content: text(record.result ?? record.errors ?? 'Agent failed').slice(0, 65_536) } : null;
+  if (type === 'system') return null;
+  if (type === 'item.completed' && record.item) return normalize(record.item);
   const message = record.message && typeof record.message === 'object' ? record.message as Record<string, unknown> : null;
   const raw = message
     ? (message.content ?? message.message ?? message.text ?? '')

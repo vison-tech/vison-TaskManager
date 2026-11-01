@@ -5,6 +5,7 @@ import { api, ApiError } from '../api';
 import { ErrorMessage, Markdown, Modal } from './shared';
 import { AutomationsPanel } from './AutomationsPanel';
 import { JiraPanel } from './JiraPanel';
+import { projectAttachmentPath } from '../lib/attachmentLinks';
 
 export function ProjectSettingsModal({ project, onClose, onSave, onDelete }: { project: Project; onClose: () => void; onSave: (input: { name: string; workspacePath: string | null; labels: string[]; readme: string; version: number }) => Promise<void>; onDelete?: () => Promise<void> }) {
   const [name, setName] = useState(project.name);
@@ -63,7 +64,7 @@ export function ProjectSettingsModal({ project, onClose, onSave, onDelete }: { p
     try {
       const attachment = await api.uploadProjectAttachment(project, file);
       setAttachments((current) => [...current, attachment]);
-      const url = api.projectAttachmentUrl(attachment.id);
+      const url = projectAttachmentPath(attachment.id);
       const markdown = file.type.startsWith('image/') ? `![${file.name}](${url})` : `[${file.name}](${url})`;
       setReadme((current) => `${current.trimEnd()}\n\n${markdown}`.trimStart());
     } catch (value) { setError(displayError(value)); } finally { setAttachmentBusy(false); event.target.value = ''; }
@@ -71,7 +72,7 @@ export function ProjectSettingsModal({ project, onClose, onSave, onDelete }: { p
 
   async function deleteAttachment(attachment: ProjectAttachment) {
     setAttachmentBusy(true);
-    try { await api.deleteProjectAttachment(attachment.id); setAttachments((current) => current.filter((item) => item.id !== attachment.id)); const url = api.projectAttachmentUrl(attachment.id); setReadme((current) => current.split('\n').filter((line) => !line.includes(`](${url})`)).join('\n').replace(/\n{3,}/g, '\n\n').trim()); } catch (value) { setError(displayError(value)); } finally { setAttachmentBusy(false); }
+    try { await api.deleteProjectAttachment(attachment.id); setAttachments((current) => current.filter((item) => item.id !== attachment.id)); const url = projectAttachmentPath(attachment.id); setReadme((current) => current.split('\n').filter((line) => !line.includes(`](${url})`)).join('\n').replace(/\n{3,}/g, '\n\n').trim()); } catch (value) { setError(displayError(value)); } finally { setAttachmentBusy(false); }
   }
 
   return <Modal title={`${project.name} · 项目设置`} onClose={onClose} wide>

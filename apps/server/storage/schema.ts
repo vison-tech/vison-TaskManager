@@ -4,6 +4,30 @@ type Row = Record<string, unknown>;
 
 export function migrate(db: DatabaseSync): void {
   const version = Number((db.prepare('PRAGMA user_version').get() as Row).user_version ?? 0);
+  if (version > 9) throw new Error(`Unsupported database schema version ${version}`);
+  if (version === 9) return;
+  migrateToV8(db);
+  db.exec(`
+    BEGIN IMMEDIATE;
+    CREATE TABLE embedded_preferences (
+      scope TEXT PRIMARY KEY CHECK (scope = 'codex'),
+      theme TEXT NOT NULL CHECK (theme IN ('light','dark','host')),
+      locale TEXT NOT NULL CHECK (locale IN ('zh','en')),
+      project_id TEXT REFERENCES projects(id) ON DELETE SET NULL
+    );
+    CREATE TABLE embedded_project_preferences (
+      scope TEXT NOT NULL CHECK (scope = 'codex'),
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      value TEXT NOT NULL CHECK (json_valid(value)),
+      PRIMARY KEY (scope, project_id)
+    );
+    PRAGMA user_version = 9;
+    COMMIT;
+  `);
+}
+
+function migrateToV8(db: DatabaseSync): void {
+  const version = Number((db.prepare('PRAGMA user_version').get() as Row).user_version ?? 0);
   if (version > 8) throw new Error(`Unsupported database schema version ${version}`);
   if (version === 1) {
     db.exec(`BEGIN IMMEDIATE; CREATE TABLE project_attachments (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL CHECK (size >= 0), content BLOB NOT NULL, created_at TEXT NOT NULL); CREATE INDEX project_attachments_project_created ON project_attachments(project_id, created_at, id); PRAGMA user_version = 2; COMMIT;`);

@@ -1,5 +1,8 @@
 # TaskManager
 
+使用入口：[TaskManaer-Vison 中文使用说明](docs/user-guide.md)（安装、AI 配置、工作区、备份与排错）。
+
+
 本项目采用 [Apache License 2.0](LICENSE) 开源。
 
 面向人与 AI Agent 协作的本地优先任务工作台。它把项目计划、任务执行、Agent 会话和开发上下文放在同一个工作面板中，支持独立使用，也支持嵌入桌面 Agent。
@@ -73,6 +76,51 @@ npm run test:browser
 npm run backup -- create ./backups/$(date +%Y%m%d-%H%M%S)
 npm run backup -- restore ./backups/<timestamp> ./.data-restored
 ```
+
+### macOS 应用（无需安装 Node）
+
+已提供包含 Node 与 SQLite 的 macOS `.app` / ZIP 打包流程。应用窗口支持数据目录、使用方式和端口选择，以及启动、停止、打开看板和查看日志。
+当前产物面向 Apple Silicon、macOS 14+，使用本地 ad-hoc 签名，尚未公证；实际安装与 Codex 联动需在目标机器验收。
+应用与数据分开存放，首次可选已有目录，新用户默认保存在 `~/Library/Application Support/TaskManager/data`。
+
+构建者需要 Node 24+、项目依赖及 Xcode 编译工具，使用者无需安装 Node 或 npm：
+
+```bash
+npm run package:mac -- --node /absolute/path/to/node --node-license /absolute/path/to/Node-LICENSE --arch arm64
+```
+
+打包只纳入程序、网页资源、已检查的运行环境及许可证；不会打包开发数据库、启动配置或环境凭证。
+命令输出应用和 ZIP 路径；验证报告、校验和及使用说明保存在同一目录。详见 [macOS 打包与使用](docs/macos-package.md)。
+
+### 源码一键启动
+
+已安装 Node.js 24+ 和项目依赖后，构建一次，再明确选择已有数据目录：
+
+```bash
+npm run build
+npm run launch -- --data-dir /absolute/path/to/taskmanager-data --port 47831
+```
+
+首次选择会保存。以后运行 `npm run launch`，或在 macOS 双击仓库中的 `TaskManager.command`。
+启动器会先启动本地服务，收到该子进程的就绪确认后再启动 Codex 注入器；运行时保持终端打开。
+如果已有手动启动的服务/注入器，请先在其终端按 Ctrl+C 停止注入器，再停止服务。
+端口占用时启动器会报错，不会接管或结束占用端口的进程。
+
+```bash
+npm run launch -- status
+npm run launch -- stop
+npm run launch -- logs
+```
+
+`Ctrl+C` 或 `stop` 会先卸载注入器，再关闭本次启动的服务，Codex 应用保持打开。
+`--mode web` 仅启动浏览器看板，按输出地址打开；`--no-launch` 仅连接已有调试端口的 Codex。
+这些选项会保存，下次可用 `--mode embed --launch-host` 切回默认方式。
+凭证仍通过 `TASKMANAGER_ACCESS_TOKEN` 等环境变量提供，不会保存在启动配置中。
+macOS 配置与轮换日志默认位于 `~/Library/Application Support/TaskManager`；可用 `--config-dir` 指定其他位置。
+
+这个命令是源码版启动入口；无需本机 Node 的应用使用上面的 macOS 打包方式。托盘、开发者签名/公证与自动更新尚未实现。
+启动状态表示服务与注入器已运行，面板实际加载仍以打开后的页面及日志为准。
+完整启停和异常恢复步骤见 [启动器验收](docs/desktop-launcher-acceptance.md)。
 
 ## Agent 联动
 
@@ -183,7 +231,7 @@ apps/
   cli/             命令行入口
   mcp/             Agent 工具入口
   host/            Codex / Claude 宿主适配
-  desktop/         后续桌面启动器
+  desktop/         源码启动器、配置、日志与进程管理
 packages/
   contracts/       共享 schema、类型、错误与事件
   domain/          纯领域规则

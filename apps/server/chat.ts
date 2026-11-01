@@ -2,6 +2,8 @@ import type { AgentCatalog, AgentMessage, AgentThread, AgentThreadCompressResult
 import { AgentRuntime, AgentRuntimeError, type AgentEvent, type AgentRun } from '../../packages/agent-runtime/index.ts';
 import { fail } from './validation.ts';
 import { Storage } from './storage.ts';
+import { attachmentContext } from './chatAttachments.ts';
+import { chatHistory, chatWorkspace } from './chatContext.ts';
 
 export type ChatTurnResult = { thread: AgentThread; message: AgentMessage; run: AgentRun };
 export type ChatMessageListener = (message: AgentMessage) => void;
@@ -136,25 +138,28 @@ export class ChatService {
    * Runs one conversational turn. The user message is only persisted after the runtime accepts the
    * run, so a rejected command never leaves an orphaned message behind.
    */
-  async turn(threadId: string, input: { input: string; command?: string; model?: string; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }): Promise<ChatTurnResult> {
+  async turn(threadId: string, input: { attachmentIds?: string[]; input: string; command?: string; model?: string; permissionMode?: AgentThread['permissionMode']; skillIds?: string[] }): Promise<ChatTurnResult> {
     const thread = this.storage.getAgentThread(threadId);
     const sessions = this.runtime.activeForSession(thread.sessionId);
     if (sessions) throw new AgentRuntimeError('SESSION_BUSY', `Thread ${threadId} already has a running agent`);
     const command = input.command ?? thread.command ?? this.runtime.capabilities().commands[0];
     if (!command) throw new AgentRuntimeError('AGENT_UNAVAILABLE', this.catalog().reason ?? 'No agent command is configured');
 
+    const prompt = input.input + attachmentContext(this.storage, thread.taskId, input.attachmentIds);
+    const cwd = await chatWorkspace(this.storage, thread);
     const run = this.runtime.start({
+      cwd,
       sessionId: thread.sessionId,
       threadId: thread.id,
       command,
       model: input.model ?? thread.model ?? undefined,
       permissionMode: input.permissionMode ?? thread.permissionMode,
       skillIds: input.skillIds ?? thread.skillIds,
-      input: input.input,
+      input: chatHistory(this.storage, thread.id) + prompt,
     });
     this.watch(thread.id);
 
-    const message = this.append(thread.id, { role: 'user', kind: 'message', content: input.input, runId: run.runId });
+    const message = this.append(thread.id, { role: 'user', kind: 'message', content: prompt, runId: run.runId });
     this.storage.touchAgentThread(thread.id, { runId: run.runId, messageCount: thread.messageCount + 1, lastMessageAt: message.createdAt });
     return { thread: this.storage.getAgentThread(thread.id), message, run };
   }

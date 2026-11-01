@@ -1,35 +1,11 @@
 import type { Status } from '../../../../packages/contracts/index.ts';
 
-export type ProjectView = 'board' | 'list' | 'dashboard' | 'timeline';
-export type CardDisplayPreferences = {
-  description: boolean;
-  labels: boolean;
-  dueDate: boolean;
-  assignee: boolean;
-  sessions: boolean;
-};
-export type ProjectPreferences = {
-  view: ProjectView;
-  status: Status | 'all';
-  showArchived: boolean;
-  search: string;
-  cardDisplay: CardDisplayPreferences;
-};
+import { defaultProjectPreferences } from '../../../../packages/contracts/preferences.ts';
+import type { CardDisplayPreferences, ProjectPreferences, ProjectView } from '../../../../packages/contracts/preferences.ts';
+export { defaultProjectPreferences } from '../../../../packages/contracts/preferences.ts';
+export type { CardDisplayPreferences, ProjectPreferences, ProjectView } from '../../../../packages/contracts/preferences.ts';
 
 export const projectPreferencesKey = 'taskmanager.project-preferences.v1';
-export const defaultProjectPreferences: ProjectPreferences = {
-  view: 'board',
-  status: 'all',
-  showArchived: false,
-  search: '',
-  cardDisplay: {
-    description: true,
-    labels: true,
-    dueDate: true,
-    assignee: true,
-    sessions: true,
-  },
-};
 
 const views = new Set<ProjectView>(['board', 'list', 'dashboard', 'timeline']);
 const statuses = new Set<Status | 'all'>(['all', 'backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'canceled']);

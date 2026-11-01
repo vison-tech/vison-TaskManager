@@ -1,6 +1,7 @@
 import type { AgentCapabilities, AgentCatalog, AgentMessage, AgentSkill, AgentThread, AgentThreadCompressResult, AgentTurnCreateInput, Automation, AutomationRun, JiraCapabilities, JiraIssue, Project, ProjectSummary, Task, TaskDetail, Comment, Attachment, ProjectAttachment, Relation, Session, TaskInput, TaskPatch, Snapshot } from '../contracts/index.ts';
 import { DEFAULT_TASKMANAGER_URL, expectedVersion, HttpTransport } from './transport.ts';
 import type { TaskClientOptions } from './transport.ts';
+import { embeddedPreferencesPath, type EmbeddedPreferences, type EmbeddedPreferencesPatch } from '../contracts/preferences.ts';
 
 export { DEFAULT_TASKMANAGER_URL, ApiError, expectedVersion, HttpTransport } from './transport.ts';
 export type { TaskClientOptions } from './transport.ts';
@@ -18,12 +19,16 @@ export class TaskClient {
   get actor(): string { return this.transport.actor; }
   get timeoutMs(): number { return this.transport.timeoutMs; }
 
+  scanWorkspace(projectId: string) { return this.request<import('../contracts/workspace.ts').WorkspaceScan>(`/api/v1/projects/${id(projectId)}/workspace`); }
+
   bootstrapSession() { return this.transport.bootstrapSession(); }
 
   attachmentUrl(attachmentId: string): string { return this.transport.attachmentUrl(attachmentId); }
   request<T>(path: string, method = 'GET', body?: unknown): Promise<T> { return this.transport.request<T>(path, method, body); }
 
   snapshot() { return this.request<Snapshot>('/api/v1/snapshot'); }
+  async getEmbeddedPreferences(): Promise<EmbeddedPreferences> { return (await this.request<{ item: EmbeddedPreferences }>(embeddedPreferencesPath)).item; }
+  async patchEmbeddedPreferences(patch: EmbeddedPreferencesPatch): Promise<EmbeddedPreferences> { return (await this.request<{ item: EmbeddedPreferences }>(embeddedPreferencesPath, 'PATCH', patch)).item; }
   async listProjects() { return (await this.request<{ items: Project[] }>('/api/v1/projects')).items; }
   async createProject(input: { name: string; prefix?: string; workspacePath?: string | null; labels?: string[]; readme?: string }) { return (await this.request<{ item: Project }>('/api/v1/projects', 'POST', input)).item; }
   async updateProject(projectId: string, input: Partial<Pick<Project, 'name' | 'workspacePath' | 'labels' | 'readme'>> & { version: number }) { expectedVersion(input.version); return (await this.request<{ item: Project }>(`/api/v1/projects/${id(projectId)}`, 'PATCH', input)).item; }

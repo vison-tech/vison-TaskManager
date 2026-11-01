@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
+import { webApiUrl } from '../lib/embedded';
 
 export function useWorkspace(includeArchived = false) {
   const client = useQueryClient();
@@ -11,11 +12,12 @@ export function useWorkspace(includeArchived = false) {
       if (!includeArchived) return snapshot;
       return { ...snapshot, tasks: await api.tasks({ archived: 'all' }) };
     },
+    placeholderData: (previous) => previous,
     refetchInterval: 30000,
   });
 
   useEffect(() => {
-    const events = new EventSource('/api/v1/events');
+    const events = new EventSource(webApiUrl('/api/v1/events'));
     const refresh = () => { void client.invalidateQueries(); };
     events.addEventListener('revision', refresh);
     events.onopen = refresh;

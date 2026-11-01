@@ -20,7 +20,7 @@ const timelineGroups: { id: string; statuses: Task['status'][]; zh: string; en: 
 ];
 
 function dayValue(value: string) { return Date.parse(`${value}T00:00:00Z`); }
-function todayValue() { return new Date().toISOString().slice(0, 10); }
+function todayValue() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; }
 
 export function DashboardView({ tasks, relations, projectId }: { tasks: Task[]; relations: Relation[]; projectId: string }) {
   const { locale, text } = useLocale();
@@ -126,25 +126,34 @@ export function TimelineView({ tasks, relations, onUpdate }: ViewProps) {
   const width = bounds.end - bounds.start;
   const unitMs = mode === 'day' ? 86_400_000 : mode === 'week' ? 604_800_000 : 2_629_800_000;
   const todayLeft = Math.min(100, Math.max(0, (dayValue(todayValue()) - bounds.start) / width * 100));
-  const axisLabels =Array.from({ length: mode === 'day' ? 14 : mode === 'week' ? 8 : 6 }, (_, index) => new Date(bounds.start + index * unitMs).toISOString().slice(0, 10));
+  const tickCount = mode === 'day' ? 14 : mode === 'week' ? 8 : 6;
+  // Sample the actual date range so a distant task cannot make the axis and bars disagree.
+  const axisTicks = Array.from({ length: tickCount }, (_, index) => {
+    const offset = Math.floor(index * width / tickCount / 86_400_000) * 86_400_000;
+    return { label: new Date(bounds.start + offset).toISOString().slice(0, 10), left: offset / width * 100 };
+  });
 
   useLayoutEffect(() => {
     const measure = () => {
       const grid = gridRef.current;
       if (!grid) return;
       const gridBounds = grid.getBoundingClientRect();
-      const width = Math.max(grid.clientWidth, grid.scrollWidth);
-      const height = Math.max(grid.clientHeight, grid.scrollHeight);
+      // Exclude the previous SVG size: otherwise collapsed rows keep its old scroll height.
+      const content = [...grid.children].filter((element): element is HTMLElement => element instanceof HTMLElement);
+      const width = Math.max(grid.clientWidth, ...content.map((element) => element.offsetLeft + element.scrollWidth));
+      const height = Math.max(0, ...content.map((element) => element.offsetTop + element.offsetHeight));
+      const offsetX = grid.scrollLeft - grid.clientLeft;
+      const offsetY = grid.scrollTop - grid.clientTop;
       const visibleIds = new Set(dated.map((task) => task.id));
       const next = relations.filter((relation) => relation.type === 'parent' || relation.type === 'blocks').flatMap((relation) => {
         if (!visibleIds.has(relation.sourceId) || !visibleIds.has(relation.targetId)) return [];
         const source = barRefs.current[relation.sourceId]?.getBoundingClientRect();
         const target = barRefs.current[relation.targetId]?.getBoundingClientRect();
         if (!source || !target) return [];
-        const startX = source.right - gridBounds.left;
-        const startY = source.top + source.height / 2 - gridBounds.top;
-        const endX = target.left - gridBounds.left;
-        const endY = target.top + target.height / 2 - gridBounds.top;
+        const startX = source.right - gridBounds.left + offsetX;
+        const startY = source.top + source.height / 2 - gridBounds.top + offsetY;
+        const endX = target.left - gridBounds.left + offsetX;
+        const endY = target.top + target.height / 2 - gridBounds.top + offsetY;
         const bend = Math.max(18, Math.abs(endX - startX) / 2);
         return [{ id: relation.id, type: relation.type, path: `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}` }];
       });
@@ -154,7 +163,7 @@ export function TimelineView({ tasks, relations, onUpdate }: ViewProps) {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [collapsedGroups, dated, mode, relations]);
+  }, [collapsedGroups, dated, dragDays, mode, relations]);
 
   useEffect(() => {
     if (!dragState) return;
@@ -200,6 +209,6 @@ export function TimelineView({ tasks, relations, onUpdate }: ViewProps) {
 
  return <section className="timeline-page" aria-label={text('项目时间轴', 'Project timeline')}>
     <div className="timeline-toolbar"><div><span className="eyebrow">{text('日期规划', 'Date planning')}</span><h2>{text('时间轴', 'Timeline')}</h2></div><div className="timeline-actions"><div className="timeline-modes" role="group" aria-label={text('时间轴范围', 'Timeline range')}>{(['day', 'week', 'month'] as const).map((value) => <button key={value} className={mode === value ? 'active' : ''} onClick={() => setMode(value)}>{value === 'day' ? text('日', 'Day') : value === 'week' ? text('周', 'Week') : text('月', 'Month')}</button>)}</div><label className="timeline-toggle"><input type="checkbox" checked={hideComplete} onChange={(event) => setHideComplete(event.target.checked)} />{text('隐藏已完成', 'Hide completed')}</label><button className="button secondary" onClick={revealToday}><CalendarRange size={14} />{text('今天', 'Today')}</button></div></div>
-    {dated.length === 0 ? <div className="timeline-empty"><CalendarRange size={24} /><strong>{text('没有可显示的日期', 'No dates to display')}</strong><span>{text('在任务详情或列表中添加开始日期或截止日期。', 'Add a start or due date in the task detail or list.')}</span></div> : <div className="timeline-grid" ref={gridRef}><svg className="timeline-dependencies" width={dependencySize.width} height={dependencySize.height} viewBox={`0 0 ${dependencySize.width} ${dependencySize.height}`} aria-hidden="true" style={{ pointerEvents: 'none' }}><defs><marker id="timeline-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="currentColor" /></marker></defs>{dependencyLines.map((line) => <path key={line.id} className={`dependency-line ${line.type}`} d={line.path} markerEnd="url(#timeline-arrow)" />)}</svg><div className="timeline-axis"><div className="timeline-label-spacer" />{axisLabels.map((label) => <span key={label}>{label}</span>)}</div>{timelineRows.map((item) => item.kind === 'group' ? <button key={`group-${item.id}`} type="button" className="timeline-group-head" aria-expanded={item.open} onClick={() => toggleGroup(item.id)}>{item.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<strong>{item.label}</strong><span>{item.count}</span></button> : (() => { const task = item.task; const start = dayValue(task.startDate ?? task.dueDate!); const end = dayValue(task.dueDate ?? task.startDate!); const isDragging = dragState?.task.id === task.id; const left = Math.max(0, (start - bounds.start) / width * 100) + (isDragging ? dragDays * 86_400_000 / width * 100 : 0); const barWidth = Math.max(2, ((Math.max(end, start) - start + 86_400_000) / width) * 100); return <div className="timeline-row" key={task.id}><div className="timeline-task"><strong>{task.identifier}</strong><span>{task.title}</span><div className="timeline-date-fields"><input aria-label={`${task.identifier} ${text('开始日期', 'Start date')}`} type="date" value={task.startDate ?? ''} onChange={(event) => void saveDate(task, 'startDate', event.target.value)} /><input aria-label={`${task.identifier} ${text('截止日期', 'Due date')}`} type="date" value={task.dueDate ?? ''} onChange={(event) => void saveDate(task, 'dueDate', event.target.value)} /></div></div><div className="timeline-track"><div className="timeline-today" style={{ left: `${todayLeft}%` }} aria-hidden="true" /><div ref={(element) => { barRefs.current[task.id] = element; }} className={`timeline-bar status-${task.status} ${isDragging ? 'dragging' : ''}`} style={{ left: `${left}%`, width: `${barWidth}%` }} title={`${task.identifier} ${task.title}`} onPointerDown={(event: PointerEvent<HTMLDivElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); setDragState({ task, startX: event.clientX, trackWidth: event.currentTarget.parentElement?.getBoundingClientRect().width ?? 1, unitMs }); }}><span>{locale === 'en' ? statusLabelsEn[task.status] : statusLabels[task.status]}</span></div></div></div>; })())}</div>}
+    {dated.length === 0 ? <div className="timeline-empty"><CalendarRange size={24} /><strong>{text('没有可显示的日期', 'No dates to display')}</strong><span>{text('在任务详情或列表中添加开始日期或截止日期。', 'Add a start or due date in the task detail or list.')}</span></div> : <div className="timeline-grid" ref={gridRef}><svg className="timeline-dependencies" width={dependencySize.width} height={dependencySize.height} viewBox={`0 0 ${dependencySize.width} ${dependencySize.height}`} aria-hidden="true" style={{ pointerEvents: 'none' }}><defs><marker id="timeline-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="currentColor" /></marker></defs>{dependencyLines.map((line) => <path key={line.id} className={`dependency-line ${line.type}`} d={line.path} markerEnd="url(#timeline-arrow)" />)}</svg><div className="timeline-axis"><div className="timeline-label-spacer" /><div className="timeline-axis-track"><div className="timeline-today" style={{ left: `${todayLeft}%` }} aria-hidden="true" />{axisTicks.map((tick) => <span key={tick.label} style={{ left: `${tick.left}%`, maxWidth: `${100 / tickCount}%` }}>{tick.label}</span>)}</div></div>{timelineRows.map((item) => item.kind === 'group' ? <button key={`group-${item.id}`} type="button" className="timeline-group-head" aria-expanded={item.open} onClick={() => toggleGroup(item.id)}>{item.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<strong>{item.label}</strong><span>{item.count}</span></button> : (() => { const task = item.task; const start = dayValue(task.startDate ?? task.dueDate!); const end = dayValue(task.dueDate ?? task.startDate!); const isDragging = dragState?.task.id === task.id; const left = Math.max(0, (start - bounds.start) / width * 100) + (isDragging ? dragDays * 86_400_000 / width * 100 : 0); const barWidth = Math.max(2, ((Math.max(end, start) - start + 86_400_000) / width) * 100); return <div className="timeline-row" key={task.id}><div className="timeline-task"><strong>{task.identifier}</strong><span>{task.title}</span><div className="timeline-date-fields"><input aria-label={`${task.identifier} ${text('开始日期', 'Start date')}`} type="date" value={task.startDate ?? ''} onChange={(event) => void saveDate(task, 'startDate', event.target.value)} /><input aria-label={`${task.identifier} ${text('截止日期', 'Due date')}`} type="date" value={task.dueDate ?? ''} onChange={(event) => void saveDate(task, 'dueDate', event.target.value)} /></div></div><div className="timeline-track" style={{ backgroundSize: `${100 / tickCount}% 100%` }}><div className="timeline-today" style={{ left: `${todayLeft}%` }} aria-hidden="true" /><div ref={(element) => { barRefs.current[task.id] = element; }} className={`timeline-bar status-${task.status} ${isDragging ? 'dragging' : ''}`} style={{ left: `${left}%`, width: `${barWidth}%` }} title={`${task.identifier} ${task.title}`} onPointerDown={(event: PointerEvent<HTMLDivElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); setDragState({ task, startX: event.clientX, trackWidth: event.currentTarget.parentElement?.getBoundingClientRect().width ?? 1, unitMs }); }}><span>{locale === 'en' ? statusLabelsEn[task.status] : statusLabels[task.status]}</span></div></div></div>; })())}</div>}
   </section>;
 }

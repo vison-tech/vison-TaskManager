@@ -19,7 +19,7 @@ export function Sidebar({ projects, activeProject, revision, onSelect, onCreate,
   }
 
   return <aside className="sidebar">
-    <div className="brand"><div className="brand-icon"><FolderKanban size={18} /></div><span>TaskManager</span><span className="brand-version">LOCAL</span></div>
+    <div className="brand"><div className="brand-icon"><FolderKanban size={18} /></div><span className="brand-name">TaskManaer-Vison</span><span className="brand-version">LOCAL</span></div>
     <div className="sidebar-projects">
       {recentProjects.length > 0 && <div className="sidebar-section"><div className="section-label"><span>{text('最近项目', 'Recent projects')}</span></div><nav className="project-nav" aria-label={text('最近项目', 'Recent projects')}>{recentProjects.map(projectLink)}</nav></div>}
       <div className="sidebar-section"><div className="section-label"><span>{text('所有项目', 'All projects')}</span><button className="icon-button tiny" aria-label={text('新建项目', 'New project')} title={text('新建项目', 'New project')} onClick={onCreate}><Plus size={15} /></button></div><nav className="project-nav" aria-label={text('所有项目', 'All projects')}>{projects.map(projectLink)}{projects.length === 0 && <div className="sidebar-empty">{text('还没有项目', 'No projects yet')}</div>}</nav><button className="new-project-link" onClick={onCreate}><Plus size={15} />{text('新建项目', 'New project')}</button></div>

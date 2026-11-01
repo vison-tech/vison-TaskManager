@@ -6,6 +6,8 @@ import type { Activity, AgentMessage, AgentThread, Attachment, Automation, Autom
 import type { AgentEvent, AgentEventType, AgentRun, AgentRuntimePersistence, AgentRuntimePersistedRun } from '../../packages/agent-runtime/index.ts';
 import { fail, validateTask } from './validation.ts';
 import { migrate } from './storage/schema.ts';
+import { EmbeddedPreferenceStore } from './storage/preferences.ts';
+import type { EmbeddedPreferencesPatch } from '../../packages/contracts/preferences.ts';
 import { activity, agentMessage, agentThread, attachment, comment, iso, json, project, projectAttachment, relation, Row, task } from './storage/serialization.ts';
 import { nextRecurrenceConfig, recurrenceNextDates } from './recurrence.ts';
 
@@ -19,6 +21,7 @@ export class Storage {
   private readonly revisionHistory: RevisionRecord[] = [];
   private readonly attachmentDir: string | null;
   private closed = false;
+  private readonly embeddedPreferences: EmbeddedPreferenceStore;
 
   constructor(dataDir: string) {
     if (dataDir !== ':memory:') mkdirSync(dataDir, { recursive: true });
@@ -27,11 +30,14 @@ export class Storage {
     this.db = new DatabaseSync(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'taskmanager.sqlite'));
     this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
     migrate(this.db);
+    this.embeddedPreferences = new EmbeddedPreferenceStore(this.db);
     this.revisionHistory.push(...this.readRevisionHistory());
     if (this.listProjects().length === 0) this.write(() => this.createProject({ name: '本地项目', prefix: 'LOCAL', workspacePath: null, labels: [], readme: '' }));
   }
 
   revision() { return Number((this.db.prepare("SELECT value FROM meta WHERE key = 'revision'").get() as Row).value); }
+  getEmbeddedPreferences() { return this.embeddedPreferences.read(); }
+  patchEmbeddedPreferences(input: EmbeddedPreferencesPatch) { return this.embeddedPreferences.patch(input); }
   private readRevisionHistory(): RevisionRecord[] { return (this.db.prepare('SELECT revision, resource, resource_id FROM revision_events ORDER BY revision DESC LIMIT 1000').all() as Row[]).reverse().map((row) => ({ revision: Number(row.revision), ...(row.resource ? { resource: String(row.resource) as RevisionRecord['resource'] } : {}), ...(row.resource_id ? { resourceId: String(row.resource_id) } : {}) })); }
   agentRuntimePersistence(): AgentRuntimePersistence {
     return {
@@ -182,6 +188,11 @@ export class Storage {
     }
     return this.appendAgentMessage(input);
   }
+  recentChatMessages(threadId: string): AgentMessage[] {
+    this.getAgentThread(threadId);
+    return (this.db.prepare("SELECT * FROM agent_messages WHERE thread_id = ? AND role IN ('user', 'assistant') AND kind = 'message' ORDER BY sequence DESC LIMIT 40").all(threadId) as Row[]).reverse().map(agentMessage);
+  }
+
   listAgentMessagesPage(threadId: string, options: { after?: number; before?: number; limit?: number } = {}): { items: AgentMessage[]; nextCursor: number } {
     this.getAgentThread(threadId);
     const limit = Math.min(Math.max(1, Math.trunc(options.limit ?? 100)), 500);

@@ -11,6 +11,7 @@ import { registerCollaborationRoutes } from './routes/collaboration.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerMetaRoutes } from './routes/meta.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
+import { registerPreferenceRoutes } from './routes/preferences.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
 import { AgentRuntime, type PermissionMode } from '../../packages/agent-runtime/index.ts';
 import type { AgentStreamMode } from '../../packages/contracts/values.ts';
@@ -89,6 +90,7 @@ export function createTaskManagerApp(options: TaskManagerAppOptions = {}): TaskM
 
   registerMetaRoutes(app, storage);
   registerProjectRoutes(app, storage);
+  registerPreferenceRoutes(app, storage);
   registerTaskRoutes(app, storage);
   registerCollaborationRoutes(app, storage);
   registerAttachmentRoutes(app, storage);

@@ -1,3 +1,4 @@
+import { claudeArguments, isClaudeCommand } from './cli.ts';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -71,7 +72,7 @@ export class AgentRuntime {
   capabilities() { return { commands: [...this.allowedCommands], models: [...this.allowedModels], permissionModes: [...this.permissionModes], skills: this.skills(), stream: this.streamMode, commandArguments: Object.fromEntries([...this.allowedCommands].map((command) => [command, [...(this.defaultArgs.get(command) ?? [])]])) }; }
 
   /** Merges the configured argv with the per-run args, so an explicit request can still extend the invocation. */
-  resolvedArgs(request: AgentRunRequest): string[] { return [...(this.defaultArgs.get(request.command) ?? []), ...(request.args ?? [])]; }
+  resolvedArgs(request: AgentRunRequest): string[] { const args = [...(this.defaultArgs.get(request.command) ?? []), ...(request.args ?? [])]; return isClaudeCommand(request.command) ? claudeArguments(request, args) : args; }
 
   start(request: AgentRunRequest, options: { resolvedArgs?: boolean } = {}): AgentRun {
     this.validateRequest(request);
@@ -82,8 +83,9 @@ export class AgentRuntime {
     const run: AgentRun = { runId: randomUUID(), sessionId: request.sessionId, status: 'running', request: { ...request, args, skillIds: [...(request.skillIds ?? [])] }, startedAt: new Date().toISOString() };
     const selectedSkills = (request.skillIds ?? []).map((skillId) => this.skillsById.get(skillId)!);
     const child = spawn(request.command, run.request.args ?? [], { cwd: request.cwd, env: { ...process.env, ...request.env, ...(selectedSkills.length ? { TASKMANAGER_SKILL_IDS: selectedSkills.map((skill) => skill.id).join(','), TASKMANAGER_SKILL_DIRS: selectedSkills.map((skill) => skill.path).join(delimiter) } : {}) }, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const state: ActiveRun = { run, process: child, events: [], nextSequence: 1, decoder: createStreamDecoder(this.streamMode) };
+    const state: ActiveRun = { run, process: child, events: [], nextSequence: 1, decoder: createStreamDecoder(isClaudeCommand(request.command) ? 'jsonl' : this.streamMode) };
     this.active.set(run.runId, state); this.append(state, { type: 'started', data: JSON.stringify({ model: request.model ?? null, permissionMode: request.permissionMode ?? 'read', skillIds: request.skillIds ?? [] }) });
+    child.stdin.on('error', () => { /* Child exit is reported by close/error; EPIPE must not crash the server. */ });
     child.stdout.on('data', (chunk: Buffer) => { if (state.run.status === 'running') { const items = state.decoder.push(chunk.toString('utf8')); this.append(state, { type: 'stdout', data: chunk.toString('utf8'), ...(items.length ? { items } : {}) }); } });
     child.stderr.on('data', (chunk: Buffer) => { if (state.run.status === 'running') this.append(state, { type: 'stderr', data: chunk.toString('utf8') }); });
     child.once('error', (error) => this.finish(state, 'failed', null, null, error.message));
@@ -94,7 +96,7 @@ export class AgentRuntime {
       // A cancelled run must report `cancelled`, even though the signal also produces a non-zero exit code.
       this.finish(state, state.cancelled ? 'cancelled' : code === 0 ? 'completed' : 'failed', code, signal);
     });
-    if (request.input !== undefined) { child.stdin.write(request.input); child.stdin.end(); }
+    if (request.input !== undefined || isClaudeCommand(request.command)) { child.stdin.end(request.input ?? ''); }
     return { ...run, request: { ...run.request, args: [...(run.request.args ?? [])], skillIds: [...(run.request.skillIds ?? [])] } };
   }
 
