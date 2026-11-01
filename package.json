@@ -20,7 +20,8 @@
     "backup": "tsx apps/server/backup.ts",
     "embed": "tsx apps/host/inject.ts",
     "launch": "node --import tsx apps/desktop/index.ts",
-    "package:mac": "node --import tsx scripts/package/index.ts"
+    "package:mac": "node --import tsx scripts/package/index.ts",
+    "package:win": "node scripts/package/windows.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

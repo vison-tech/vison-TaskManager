@@ -18,7 +18,7 @@ export function spawnOwnedChild(options: ChildOptions): OwnedChild {
   const child = spawn(options.command.file, options.command.args, {
     cwd: options.cwd, env: { ...options.env, TASKMANAGER_LAUNCHER_ID: options.instanceId },
     // Keep terminal Ctrl+C on the supervisor, which tears down the injector first.
-    detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let result: ChildResult | undefined;
   let settleExit!: (result: ChildResult) => void;
@@ -82,8 +82,10 @@ export function spawnOwnedChild(options: ChildOptions): OwnedChild {
     },
     async stop(timeoutMs) {
       if (result) return result;
-      // child.kill checks the known handle's exit status; no process-group or PID-file kill.
-      child.kill('SIGTERM');
+      // Windows kill(SIGTERM) forcibly terminates Node. Closing our IPC channel
+      // lets managed children drain requests and close SQLite before exiting.
+      if (process.platform === 'win32' && child.connected) child.disconnect();
+      else child.kill('SIGTERM');
       const force = setTimeout(() => { if (!result) child.kill('SIGKILL'); }, timeoutMs);
       try { return await exited; } finally { clearTimeout(force); }
     },

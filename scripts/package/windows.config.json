@@ -1,0 +1,7 @@
+{
+  "nodeVersion": "24.22.2",
+  "innoDownloadUrl": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe",
+  "toolsDirectory": "D:\\software\\TaskManager-build-tools",
+  "nodeDirectory": "D:\\software\\TaskManager-build-tools\\node-v24.22.2-win-x64",
+  "innoCompiler": "D:\\software\\TaskManager-build-tools\\InnoSetup\\ISCC.exe"
+}

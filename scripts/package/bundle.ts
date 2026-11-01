@@ -13,8 +13,9 @@ export function assertSelfContainedBundle(metafile: Metafile): void {
   }
 }
 
-export async function bundleApplication(root: string, destination: string): Promise<string[]> {
-  const entries = ['desktop/index', 'desktop/gui', 'desktop/selfcheck', 'server/index', 'host/inject'];
+export async function bundleApplication(root: string, destination: string, platform: 'darwin' | 'win32' = 'darwin'): Promise<string[]> {
+  const entries = ['desktop/index', 'desktop/gui', 'desktop/selfcheck', 'server/index', 'host/inject',
+    ...(platform === 'win32' ? ['desktop/windows'] : [])];
   const result = await build({
     absWorkingDir: root,
     entryPoints: Object.fromEntries(entries.map((entry) => [`apps/${entry}`, join(root, `apps/${entry}.ts`)])),

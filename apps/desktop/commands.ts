@@ -7,7 +7,11 @@ import { acquireLauncherLock, readLauncherStatus, requestLauncherStop } from './
 import { assertLauncherAssets, assertLauncherPort } from './preflight.ts';
 import { superviseLauncher } from './supervisor.ts';
 
-export interface LauncherOptions { bundled?: boolean; signal?: AbortSignal }
+export interface LauncherOptions {
+  bundled?: boolean;
+  signal?: AbortSignal;
+  onRunning?: (config: ReturnType<typeof resolveLauncherConfig>) => void;
+}
 
 export const launcherHelp = `TaskManager 一键启动（源码版，需要 Node.js 24+）
 
@@ -98,7 +102,8 @@ async function launch(dir: string, config: ReturnType<typeof resolveLauncherConf
     log('launcher', `Starting ${config.mode}; data directory: ${config.dataDir}\n`);
     await superviseLauncher({
       config, root, instanceId: lock.state.instanceId, signal: controller.signal, log, bundled: options.bundled,
-      onRunning: () => lock.update('running'), onStopping: () => lock.update('stopping'),
+      onRunning: () => { lock.update('running'); options.onRunning?.(config); },
+      onStopping: () => lock.update('stopping'),
     });
     if (logFailure) throw new Error('启动器因日志或状态保存失败而停止。');
     log('launcher', 'Stopped.\n');

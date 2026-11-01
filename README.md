@@ -92,6 +92,19 @@ npm run package:mac -- --node /absolute/path/to/node --node-license /absolute/pa
 打包只纳入程序、网页资源、已检查的运行环境及许可证；不会打包开发数据库、启动配置或环境凭证。
 命令输出应用和 ZIP 路径；验证报告、校验和及使用说明保存在同一目录。详见 [macOS 打包与使用](docs/macos-package.md)。
 
+### Windows 安装包（无需安装 Node）
+
+已提供 Windows x64 浏览器模式打包流程，内置 Node 24 和 SQLite，支持开始菜单快捷方式和卸载。
+程序默认安装到 `D:\software\TaskManager`，数据和日志保存在旁边独立的 `TaskManager-data\<Windows用户名>` 目录。
+打包工具也默认放在 D 盘。Windows Codex 内嵌模式尚未适配。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package/setup-windows-tools.ps1
+npm run package:win
+```
+
+安装目录、使用方式和构建验证见 [Windows 打包与使用](docs/windows-package.md)。
+
 ### 源码一键启动
 
 已安装 Node.js 24+ 和项目依赖后，构建一次，再明确选择已有数据目录：
